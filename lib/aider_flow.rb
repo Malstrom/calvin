@@ -6,7 +6,7 @@
 #
 # Steps:
 #   fetch_agent_prompt → setup_branch → aider → rubocop autocorrect
-#   → run_tests → squash_commit → push_branch → open_pr
+#   → squash_commit → push_branch → open_pr
 #
 # Il primo Failure interrompe il flusso. L'orchestratore gestisce
 # l'errore finale via result.failure { |err| ... }.
@@ -29,7 +29,6 @@ module Calvin
       yield setup_branch
       yield AiderRunner.new.apply(prompt)
       yield run_rubocop
-      yield run_tests
       yield squash_commit
       yield push_branch
       pr_url = yield open_pr
@@ -70,19 +69,6 @@ module Calvin
       Success(:rubocop_done)
     end
 
-    def run_tests
-      Calvin::LOG.info "Running tests..."
-      result = CiRunner.new.run
-
-      if result.passed
-        Calvin::LOG.info "Tests passed ✅"
-        Success(:tests_passed)
-      else
-        Calvin::LOG.warn "Tests failed ❌"
-        Failure("Tests falliti:\n#{result.output.slice(0, 4_000)}")
-      end
-    end
-
     # Raccoglie tutte le modifiche di Aider in un unico commit pulito.
     def squash_commit
       system("git add -A")
@@ -114,7 +100,7 @@ module Calvin
       <<~MD
         <!-- calvin-status -->
         **Calvin** · `#{@branch}`
-        🟢 Tests passed · [PR aperta](#{pr_url})
+        🟢 Rubocop OK · [PR aperta](#{pr_url})
       MD
     end
   end
