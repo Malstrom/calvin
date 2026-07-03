@@ -4,7 +4,12 @@
 # --no-auto-commits: Aider scrive i file ma non committa.
 # Calvin fa git add + commit + push dopo rubocop.
 #
-# .apply(prompt) → Success({ stdout:, tokens: }) | Failure(stderr)
+# --subtree-only: limita la repo-map a backend/api/ per ridurre i token
+# consumati dalla mappa. Il processo gira comunque dalla root del repo
+# (working-directory: target nel workflow) quindi i path dei file
+# scritti da Aider sono sempre corretti relativamente alla root.
+#
+# .apply(prompt) -> Success({ stdout:, tokens: }) | Failure(stderr)
 
 require "open3"
 require "dry/monads"
@@ -13,11 +18,8 @@ module Calvin
   class AiderRunner
     include Dry::Monads[:result]
 
-    AIDER_MODEL = "codestral/codestral-latest"
-
-    # Scansiona solo la cartella backend/api dove vive la maggior parte
-    # del codice Rails. Riduce la repo-map da ~4000 a ~1000 token.
-    SUBTREE_DIR = "backend/api"
+    AIDER_MODEL  = "codestral/codestral-latest"
+    MAP_TOKENS   = "1000"
 
     SYSTEM_PROMPT = <<~PROMPT.freeze
       You are a senior Rails developer working on an existing Rails codebase.
@@ -43,12 +45,12 @@ module Calvin
         "--no-auto-lint",
         "--no-auto-commits",
         "--subtree-only",
-        "--map-tokens",      "2000",
+        "--map-tokens",      MAP_TOKENS,
         "--message",         full_message
       ]
 
-      Calvin::LOG.info "Running aider (#{AIDER_MODEL}, subtree: #{SUBTREE_DIR})..."
-      stdout, stderr, status = Open3.capture3(env, *cmd, chdir: SUBTREE_DIR)
+      Calvin::LOG.info "Running aider (#{AIDER_MODEL}, --subtree-only, map-tokens: #{MAP_TOKENS})..."
+      stdout, stderr, status = Open3.capture3(env, *cmd)
       Calvin::LOG.info stdout.slice(0, 3_000) unless stdout.empty?
       Calvin::LOG.warn stderr.slice(0, 1_000) unless stderr.empty?
 
@@ -67,8 +69,8 @@ module Calvin
       line = text.lines.reverse.find { |l| l.match?(/Tokens:/i) }
       return {} unless line
 
-      sent     = line.match(/([\d,]+)\s*sent/)&.captures&.first&.delete(",")&.to_i
-      received = line.match(/([\d,]+)\s*received/)&.captures&.first&.delete(",")&.to_i
+      sent     = line.match(/([\d,]+)\s+sent/)&.captures&.first&.delete(",")&.to_i
+      received = line.match(/([\d,]+)\s+received/)&.captures&.first&.delete(",")&.to_i
       cost_str = line.match(/Cost:\s*\$?([\d.]+)/)&.captures&.first
 
       { sent: sent.to_i, received: received.to_i, cost_usd: cost_str&.to_f }
