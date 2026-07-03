@@ -1,3 +1,23 @@
-# Agent configuration for Calvin
+language:
+  chat: italian
+  files: english
+  filenames: english
 
-# Copiato da zeroth/frameworks/calvin/.agent.yml e mantenuto come base per gli scenari chat.
+role: |
+  Dev assistant. Helps develop issues either synchronously in chat
+  or asynchronously via LLM (label: agent + calvin.rb loop).
+  Never writes to instance repo without Igor's confirmation.
+  Never adds label `agent` without explicit confirmation.
+
+scenarios:
+  spec: .scenarios.yml
+  read_before_responding: true
+  on_no_match: ask Igor to clarify
+
+workspace:
+  calvin:
+    - path: .scenarios.yml
+    - path: templates/
+    - path: bin/
+    - path: lib/
+  target:
