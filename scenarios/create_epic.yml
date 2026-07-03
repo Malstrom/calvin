@@ -1,57 +1,42 @@
 id: create_epic
-on:
-  - user wants to create an epic
-  - user says "crea epic", "crea issue madre", "apri epic"
-  - triggered after reasoning in chat about a feature
-preconditions: any
+role: |
+  Epic creation scenario. Creates a parent issue (epic) from chat context.
+  MUST use templates/issue_epic.md as the issue body structure.
+  No epic may be created with a blank or free-form body.
 
-note: |
-  This scenario is triggered explicitly by Igor after discussing the feature in chat.
-  Perplexity has context from the conversation — do not re-ask what was already discussed.
+steps:
+  - name: read_context
+    description: |
+      Read the chat context and any linked docs, specs or Notion links
+      provided by Igor to understand the epic scope.
 
-reads:
-  - instance:.calvin/stack.yml
-  - instance:docs/ (files referenced in conversation)
+  - name: draft_epic_body
+    description: |
+      Draft the epic body using templates/issue_epic.md (in the Calvin repo).
+      Fill all relevant fields:
+        - Goal: one sentence, concrete and verifiable
+        - Why: business or product reason
+        - Stack: backend / ios / frontend checkboxes
+        - Docs: links to specs, designs, ADRs
+        - Scope: explicit in/out of scope
+        - Sub-issues: leave empty at creation, filled by decompose scenario
+        - Notes: edge cases, risks, dependencies
+      Do not invent content. If a field cannot be filled from context, leave
+      the placeholder and flag it to Igor in chat.
 
-states:
-  draft_epic:
-    action: output
-    template: frameworks/calvin/templates/issue_epic.md
-    instructions:
-      - fill Goal and Why from the conversation context
-      - check stack boxes that apply (backend / ios)
-      - Docs: link exact paragraphs from docs/ mentioned in conversation
-        format: "[docs/path/file.md#anchor](docs/path/file.md#anchor)"
-        note: read the actual docs/ files to find the correct anchor
-      - Scope: summarize what is in and what is explicitly out
-      - leave Sub-issues empty — populated by decompose
-    next: confirm_epic
+  - name: confirm_with_igor
+    description: |
+      Show the draft to Igor in chat. Refine until all required fields
+      (Goal, Why, Stack, Scope) are filled and accurate.
 
-  confirm_epic:
-    action: confirm
-    message: is the epic body correct? edit if needed
-    on_confirm:
-      next: ask_title
-    on_changes:
-      next: draft_epic
+  - name: create_issue
+    description: |
+      Create the issue in the TARGET repo (e.g. synca) using the confirmed
+      body. Apply label `epic` automatically.
+      Template to use: templates/issue_epic.md (in the Calvin repo).
 
-  ask_title:
-    action: ask
-    message: |
-      title for the epic? (or confirm this one)
-      suggestion: {{suggested_title_from_goal}}
-    next: create_issue
-
-  create_issue:
-    action: github_create_issue
-    target: instance
-    title: "{{title}}"
-    body: draft_epic
-    labels: [epic, "{{stack_label}}"]
-    next: done
-
-  done:
-    action: output
-    message: |
-      ✅ Epic #{{issue_number}} created.
-      When ready: tell me to decompose it into sub-issues.
+constraints:
+  - MUST use templates/issue_epic.md as body structure. Never create a blank epic.
+  - Do not add label `agent` or `task` to an epic.
+  - Template to use: templates/issue_epic.md (in the Calvin repo).
+  - Target repo: workspace.target in .agent.yml.

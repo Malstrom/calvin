@@ -1,90 +1,58 @@
 id: decompose
-on:
-  - user wants to decompose an epic into sub-issues
-  - user says "decomponila", "crea sub issue", "decompose"
-  - user references an epic issue number
-preconditions: epic issue exists
+role: |
+  Decomposition scenario. Reads an epic issue and expands it into atomic
+  sub-issues (tasks) using templates/issue_task.md as body structure.
+  MUST use templates/issue_task.md for every task created.
+  No task may be created with a blank or free-form body.
 
-reads:
-  - instance:github:issue:{{epic_number}}
-  - instance:docs/ (files linked in epic Docs section)
-  - instance:.calvin/stack.yml
+steps:
+  - name: read_epic
+    description: |
+      Read the epic issue body (Goal, Why, Stack, Scope, Docs, Notes)
+      from the TARGET repo.
 
-states:
-  resolve_epic:
-    condition: epic_number present
-    on_missing:
-      action: ask
-      message: which epic do you want to decompose?
-      next: stop
-    on_present:
-      next: read_docs
+  - name: read_calvin_context
+    description: |
+      Read .calvin/* from the TARGET repo:
+        - .calvin/stack.yml
+        - .calvin/conventions.yml
+        - .calvin/schema.yml
+      Use these to inform task granularity and entry points.
+      Do not read from the Calvin repo itself.
 
-  read_docs:
-    action: read_files
-    source: epic.docs_links
-    note: read each linked paragraph to understand full scope before proposing tasks
-    next: propose_tasks
+  - name: propose_tasks
+    description: |
+      Propose a list of atomic tasks to Igor in chat before creating anything.
+      Each task must be:
+        - Independently implementable by the agent in one PR
+        - Scoped to one endpoint, one model change, or one UI screen
+        - Not dependent on another task in the same batch unless unavoidable
+      Show the proposed list and wait for confirmation.
 
-  propose_tasks:
-    action: output
-    format: |
-      Proposed sub-issues for epic #{{epic_number}}:
+  - name: create_tasks
+    description: |
+      For each confirmed task, create an issue in the TARGET repo using
+      templates/issue_task.md (in the Calvin repo) as body structure.
+      Fill all fields available from context:
+        - Goal, Parent (#epic number), Stack
+        - DB Changes (if known)
+        - Endpoint (if known)
+        - Entry points (if known from .calvin/stack.yml or conventions.yml)
+        - Acceptance criteria
+        - Dependencies
+        - Notes, Examples
+      Fields that require repo exploration (e.g. exact file paths) can be
+      left as placeholders — refine_task scenario will complete them.
+      Apply label `task` automatically. Link to parent epic.
 
-      {{#each tasks}}
-      **Task {{index}}** {{#if depends_on}}(depends on Task {{depends_on}}){{/if}}
-      Title: {{title}}
-      Goal: {{goal}}
-      Stack: {{stack}}
-      Acceptance criteria:
-      {{#each criteria}}- {{this}}{{/each}}
-      {{/each}}
+  - name: link_sub_issues
+    description: |
+      Add each created task as a sub-issue of the epic.
+      Update the epic body Sub-issues section with the task numbers.
 
-      Order: {{execution_order}}
-    instructions:
-      - each task must be atomic — executable in one PR by one model run
-      - add depends_on only if a task genuinely cannot start before another is merged
-      - do not over-decompose — prefer fewer larger tasks over many tiny ones
-      - infer stack (backend/ios) per task, not just from the epic
-    next: confirm_tasks
-
-  confirm_tasks:
-    action: confirm
-    message: are these sub-issues correct? add, remove or edit before creating
-    on_confirm:
-      next: create_tasks
-    on_changes:
-      next: propose_tasks
-
-  create_tasks:
-    action: github_create_issues
-    target: instance
-    for_each: tasks
-    template: frameworks/calvin/templates/issue_task.md
-    fields:
-      title: task.title
-      body:
-        Goal: task.goal
-        Parent: "#{{epic_number}}"
-        Stack: task.stack
-        Acceptance criteria: task.criteria
-        Dependencies: task.depends_on
-      labels: [task, "{{task.stack_label}}"]
-    sub_issue_of: "{{epic_number}}"
-    next: update_epic
-
-  update_epic:
-    action: github_update_issue
-    target: instance:github:issue:{{epic_number}}
-    section: "## Sub-issues"
-    content: |
-      {{#each created_tasks}}
-      - #{{number}} {{title}} {{#if depends_on}}(after #{{depends_on_number}}){{/if}}
-      {{/each}}
-    next: done
-
-  done:
-    action: output
-    message: |
-      ✅ {{tasks.count}} sub-issues created under epic #{{epic_number}}.
-      Next: pick a task and tell me to prepare it for async execution.
+constraints:
+  - MUST use templates/issue_task.md as body structure. Never create a blank task.
+  - Do not add label `agent` in this scenario.
+  - Template to use: templates/issue_task.md (in the Calvin repo).
+  - Context source: .calvin/* files in the TARGET repo, not in Calvin.
+  - Target repo: workspace.target in .agent.yml.
