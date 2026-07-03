@@ -1,11 +1,5 @@
 # frozen_string_literal: true
 # Orchestratore Calvin — entry point per GitHub Actions.
-#
-# label: agent       → CommentFlow  (Mistral risponde con markdown sull'issue)
-# label: agent-aider → AiderFlow    (Aider genera, scrive i file, apre PR)
-#
-# Entrambi i flow ritornano un Result monad (dry-monads).
-# Un Failure finale viene loggato e termina il processo con exit 1.
 
 require "dry/monads"
 require "octokit"
@@ -47,7 +41,11 @@ result =
   end
 
 result.failure do |err|
-  Calvin::LOG.error err
-  github.post_status(issue, "\u{1F6AB} error\n\n```\n#{err}\n```")
+  Calvin::LOG.error "FAILURE: #{err}"
+  begin
+    github.post_status(issue, "\u{1F534} Calvin error\n\n```\n#{err}\n```")
+  rescue => e
+    Calvin::LOG.error "post_status fallito: #{e.message}"
+  end
   exit 1
 end
