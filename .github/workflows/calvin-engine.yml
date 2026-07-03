@@ -94,7 +94,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ inputs.target_repo }}
           GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-          CALVIN_MODEL: mistral-medium-3
+          CALVIN_MODEL: codestral-latest
           DATABASE_URL: postgres://postgres:postgres@localhost/synca_test
           RAILS_ENV: test
           SECRET_KEY_BASE: a_dummy_secret_for_ci_at_least_64_chars_long_so_hmac_is_happy_1234
