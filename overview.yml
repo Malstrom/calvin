@@ -1,39 +1,51 @@
 name: calvin
-version: 1
+version: 2
 status: active
 
-tag_line: "Issue in. PR out. Context never lost."
+tag_line: "Tutta la complessità in chat. Tutta la densità nel prompt."
 
 purpose: >
-  Calvin is an autonomous development loop. Perplexity transforms issues into
-  model-ready comments. calvin.rb executes them via Aider, opens PRs.
-  Context accumulates in .calvin/ — never in conversation history.
+  Calvin è un agente CI per sviluppo asincrono. Le epic e le task vengono
+  create e raffinate in chat (scenari calvin) finché sono dense e chiare.
+  Poi Calvin costruisce un prompt agente minimale ma preciso e lo esegue via
+  GitHub Actions e Aider/LLM, aprendo PR. Le decisioni e il contesto duraturo
+  vivono in .calvin/ dentro il repo target.
 
 actors:
-  igor: creates issues, reviews PRs, confirms every agent action
-  perplexity: writes async-ready comments, manages labels, updates .calvin/
-  calvin_rb: polls label:agent, runs Aider with provider fallback, opens PR
-  model: executes task via Aider, writes Calvin notes in PR body
+  igor: crea epic e task in chat, conferma gli scenari, rivede e mergea PR
+  perplexity: guida la chat, riempie i template issue_epic.md/issue_task.md,
+    scrive il prompt agente agent_prompt.md, propone aggiornamenti a .calvin/
+  calvin_cli: entrypoint in bin/calvin, legge issue + .calvin/* + agent_prompt
+    e orchestra Aider/LLM + post-processor
+  model: esegue la task via Aider/LLM, scrive note Calvin in corpo PR
 
-decisions:
+ decisions:
   framework_name: calvin
   instance_folder: .calvin/
-  architecture: zeroth-compliant — mirrors frameworks/daneel and frameworks/dojo
-  entry_point: frameworks/calvin/.agent.yml
+  architecture: zeroth-compliant — estratto da frameworks/calvin in zeroth,
+    ora repo dedicata
+  entry_point: bin/calvin
   issue_authoring: >
-    Two steps: Igor creates issue. On explicit command, Perplexity posts
-    async-ready comment. Igor confirms → label agent added. Body never modified.
-  label_agent_gate: Perplexity never adds label:agent without Igor confirmation
-  async_ready_comment: lives in a comment, not the body. Template: issue_async_ready.md
+    Tutte le epic e le task vengono scritte e raffinate in chat usando
+    issue_epic.md e issue_task.md. Il prompt agente viene scritto come
+    commento strutturato (agent_prompt.md) sulla task.
+  label_agent_gate: >
+    La label agent/agent-aider viene aggiunta solo dopo conferma esplicita
+    in chat (Igor conferma che la task e il prompt sono pronti).
+  async_prompt_location: >
+    Il prompt agente vive in un commento sulla issue (non nel body) e usa
+    agent_prompt.md. La issue resta leggibile per gli umani.
   feedback_loop: >
-    Model posts ## Calvin notes in every PR body. Perplexity proposes .calvin/
-    updates during review_pr. Igor confirms before every write.
-  dependency_resolution: skip and retry on next poll cycle
+    Il modello scrive note Calvin nel corpo PR (sezione dedicata). Gli
+    scenari review_pr e update_context usano queste note per aggiornare
+    .calvin/conventions.yml, testing.yml, decisions.yml.
+  dependency_resolution: skip e retry nel prossimo ciclo di polling
   execution_visibility: >
-    Model posts 1 comment on issue at start, edits in-place.
-    Final: done PR #N or blocked.
+    Calvin commenta sull'issue quando parte l'esecuzione, aggiorna lo
+    stesso commento finché la PR è aperta/chiusa.
   polling_language: ruby
-  engine: Option B (Aider wrapper). Migrate to Option A only if Aider violates scope >20%
+  engine: Option A (Calvin come prodotto CI, non gem; integra Aider ma non
+    dipende da lui in architettura).
   provider_default: mistral/codestral-latest
   provider_fallback:
     - cerebras/gpt-oss-120b
@@ -43,30 +55,31 @@ decisions:
     - openrouter/deepseek/deepseek-chat-v4-flash:free
     - ollama/qwen2.5:32b
   context_update: >
-    After every merged PR with agent:review: calvin.rb reads ## Calvin notes,
-    opens micro-PR on .calvin/. Igor merges in ~10s.
+    Dopo ogni PR agent:review merged, Calvin legge le note dal corpo PR,
+    propone micro-PR su .calvin/* via scenario update_context. Igor conferma.
 
 label_lifecycle:
-  agent: set by Perplexity after Igor confirmation — ready for execution
-  agent:review: set by calvin.rb — PR opened, awaiting Igor review
-  agent:blocked: set by calvin.rb — all providers failed
-  agent:skip: set by Igor — skip this issue
-  epic: parent issue, decomposed into tasks
-  task: atomic executable sub-issue
-  backend: Rails/backend stack
-  ios: iOS/Swift stack
+  agent: set dopo conferma in chat — pronta per esecuzione asincrona
+  agent:review: set da Calvin quando apre PR
+  agent:blocked: set da Calvin quando tutti i provider falliscono
+  agent:skip: set da Igor per saltare una issue
+  epic: issue madre, decomposta in task
+  task: sub-issue eseguibile, riempita con issue_task.md
+  backend: stack Rails/backend
+  ios: stack iOS/Swift
 
 issue_flow:
   epic: create_epic → decompose → N task issues
-  task: write_async_ready → label:agent → calvin.rb → PR → review_pr → merge
+  task: refine_task → draft_agent_prompt → label:agent → calvin_cli → PR → review_pr → merge
 
 scenarios:
+  - session_start
   - create_epic
   - decompose
-  - write_async_ready
+  - refine_task
+  - draft_agent_prompt
   - calvanize
   - review_pr
   - update_context
-  - session_start
 
 derives_from: zeroth
