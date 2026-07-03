@@ -4,12 +4,6 @@
 # --no-auto-commits: Aider scrive i file ma non committa.
 # Calvin fa git add + commit + push dopo rubocop.
 #
-# --subtree-only: limita la repo-map ai file nella dir corrente.
-# Il processo gira dalla root del repo (working-directory: target)
-# quindi .aiderignore esclude apps/, docs/, vendor/ ecc.
-# Repo-map usa il default 4000 token — necessario perché Aider
-# deve trovare i file da solo senza che glieli passiamo esplicitamente.
-#
 # --yes-always: risponde automaticamente yes a tutte le domande
 # interattive. Necessario per run headless in CI (fd=0 non è un TTY).
 #
@@ -47,11 +41,10 @@ module Calvin
         "--yes-always",
         "--no-auto-lint",
         "--no-auto-commits",
-        "--subtree-only",
         "--message",         full_message
       ]
 
-      Calvin::LOG.info "Running aider (#{AIDER_MODEL}, --subtree-only, map-tokens: default)..."
+      Calvin::LOG.info "Running aider (#{AIDER_MODEL})..."
       stdout, stderr, status = Open3.capture3(env, *cmd)
       Calvin::LOG.info stdout.slice(0, 3_000) unless stdout.empty?
       Calvin::LOG.warn stderr.slice(0, 1_000) unless stderr.empty?
