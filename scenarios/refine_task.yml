@@ -1,33 +1,32 @@
 id: refine_task
 role: |
-  Scenario di raffinazione della task. Prende una issue esistente (task)
-  e la porta al livello di dettaglio richiesto per Calvin, leggendo
-  .calvin/* e porzioni mirate della repo (router/controller/contract,
-  job, test) e aggiornando il corpo della issue usando issue_task.md.
+  Task refinement scenario. Takes an existing task issue and brings it
+  to the required level of detail for Calvin, reading .calvin/* and
+  targeted parts of the repo (router/controller/contract, jobs, tests)
+  and updating the issue body using issue_task.md.
 
 steps:
-  - name: leggere_contesto_issue
+  - name: read_issue_context
     description: |
-      Legge il corpo della issue task, le label (epic, task, backend, ios) e
-      eventuali link a docs.
-  - name: leggere_contesto_calvin
+      Read the task issue body, labels (epic, task, backend, ios) and
+      any linked docs.
+  - name: read_calvin_context
     description: |
-      Legge i file .calvin/stack.yml, .calvin/conventions.yml,
+      Read .calvin/stack.yml, .calvin/conventions.yml,
       .calvin/testing.yml, .calvin/decisions.yml, .calvin/schema.yml.
-  - name: esplorare_repo_mirata
+  - name: explore_repo_targeted
     description: |
-      Esplora solo i punti di ingresso rilevanti (router, controller,
-      contract, job, test) legati alla task, evitando scan completo.
-  - name: aggiornare_issue_task
+      Explore only relevant entry points (router, controller, contract,
+      jobs, tests) tied to the task, avoiding a full scan.
+  - name: update_issue_task
     description: |
-      Aggiorna il corpo della issue usando il template issue_task.md,
-      riempiendo Goal, Stack, DB Changes, Endpoint, Entry points,
-      Acceptance criteria, Examples.
-  - name: conferma_con_igor
+      Update the issue body using issue_task.md, filling Goal, Stack,
+      DB Changes, Endpoint, Entry points, Acceptance criteria, Examples.
+  - name: confirm_with_igor
     description: |
-      Mostra la nuova versione della task a Igor in chat e la raffina
-      finché è soddisfatto.
+      Show the new version of the task to Igor in chat and refine it
+      until he is satisfied.
 
 constraints:
-  - Non cambiare il numero della issue né le label senza conferma.
-  - Non aggiungere label `agent` in questo scenario.
+  - Do not change the issue number or labels without confirmation.
+  - Do not add the `agent` label in this scenario.

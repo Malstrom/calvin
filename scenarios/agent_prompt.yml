@@ -1,35 +1,34 @@
 id: agent_prompt
 role: |
-  Scenario di scrittura del prompt agente. Parte da una task già
-  raffinata (issue_task.md completa) e da .calvin/*, e produce un
-  commento strutturato usando agent_prompt.md, pensato per essere
-  letto dal modello in esecuzione asincrona.
+  Agent prompt writing scenario. Starts from a refined task (issue_task.md
+  complete) and .calvin/*, and produces a structured comment using
+  agent_prompt.md, meant to be read by the model during async execution.
 
 steps:
-  - name: leggere_issue_task
+  - name: read_issue_task
     description: |
-      Legge il corpo della issue task, con Goal, Stack, Endpoint,
-      Entry points, Acceptance criteria, Examples.
-  - name: selezionare_contesto_calvin
+      Read the task issue body, with Goal, Stack, Endpoint, Entry points,
+      Acceptance criteria, Examples.
+  - name: select_calvin_context
     description: |
-      Seleziona solo le parti rilevanti di .calvin/conventions.yml,
+      Select only relevant parts of .calvin/conventions.yml,
       .calvin/testing.yml, .calvin/decisions.yml, .calvin/schema.yml,
-      evitando di copiare tutto.
-  - name: costruire_agent_prompt
+      avoiding copying everything.
+  - name: build_agent_prompt
     description: |
-      Compila agent_prompt.md con Goal, Entry points, Constraints,
-      Tests, Depends on, Context, Examples, evitando ripetizioni
-      del testo già presente nella issue.
-  - name: postare_commento
+      Fill agent_prompt.md with Goal, Entry points, Constraints, Tests,
+      Depends on, Context, Examples, avoiding repetition of text already
+      present in the issue.
+  - name: post_comment
     description: |
-      Posta il commento sulla issue usando agent_prompt.md come
-      struttura, senza modificare il body della issue.
-  - name: conferma_e_label
+      Post the comment on the issue using agent_prompt.md as structure,
+      without modifying the issue body.
+  - name: confirm_and_label
     description: |
-      Chiede conferma a Igor in chat; solo dopo conferma, aggiunge
-      la label `agent` o `agent-aider` per attivare il workflow.
+      Ask Igor for confirmation in chat; only after confirmation, add the
+      `agent` or `agent-aider` label to trigger the workflow.
 
 constraints:
-  - Non modificare il body dell'issue in questo scenario.
-  - Non includere nel prompt più contesto di quanto strettamente
-    necessario per la task.
+  - Do not modify the issue body in this scenario.
+  - Do not include more context in the prompt than strictly necessary
+    for the task.
