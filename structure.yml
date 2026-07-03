@@ -2,96 +2,96 @@ root: calvin/
 
 files:
   .agent.yml:
-    role: operational manifest per l'assistente in chat
+    role: operational manifest for the chat assistant
     written_by: Igor + Perplexity
-    updated_by: manual quando il ruolo di Calvin evolve
+    updated_by: manual when Calvin's role evolves
 
   .scenarios.yml:
-    role: indice scenari — mappa i trigger ai file in scenarios/
+    role: scenario index — maps triggers to files in scenarios/
     written_by: Perplexity
-    updated_by: quando gli scenari vengono aggiunti o rinominati
+    updated_by: when scenarios are added or renamed
 
   overview.yml:
-    role: decisioni, label lifecycle, attori, issue_flow
+    role: decisions, label lifecycle, actors, issue_flow
     written_by: Perplexity
-    updated_by: quando decisioni e flusso cambiano
+    updated_by: when decisions or flow change
 
   structure.yml:
-    role: questo file — mappa di tutti i file del framework con ruoli
+    role: this file — map of all framework files with roles
     written_by: Perplexity
-    updated_by: quando file o cartelle cambiano
+    updated_by: when files or folders change
 
   README.md:
-    role: human entry point — quick start, contesto Asimov/zeroth e file map
+    role: human entry point — quick start, Asimov/zeroth context and file map
     written_by: Igor + Perplexity
-    updated_by: quando struttura o flusso cambiano
+    updated_by: when structure or flow change
 
 scenarios/:
   session_start.yml:
-    role: orienta la sessione, mostra lavoro aperto e scenari disponibili
+    role: orients the session, shows open work and available scenarios
 
   create_epic.yml:
-    role: crea issue madre (epic) da contesto chat, linka docs/ paragrafi
+    role: creates parent issues (epics) from chat context, links docs/ paragraphs
 
   decompose.yml:
-    role: legge l'epic + docs/ ed espande in sub-issue atomiche usando issue_task.md
+    role: reads the epic + docs/ and expands into atomic sub-issues using issue_task.md
 
   refine_task.yml:
-    role: prende una task esistente e la porta al livello di dettaglio richiesto,
-      leggendo .calvin/* e porzioni mirate di repo
+    role: takes an existing task and brings it to the required level of detail,
+      reading .calvin/* and targeted parts of the repo
 
-  draft_agent_prompt.yml:
-    role: legge epic, task e .calvin/* e scrive il prompt agente usando agent_prompt.md
+  agent_prompt.yml:
+    role: reads epic, task and .calvin/* and writes the agent prompt using agent_prompt.md
 
   calvanize.yml:
-    role: bootstrap di .calvin/ su un nuovo repo target
+    role: bootstraps .calvin/ on a new target repo
 
   review_pr.yml:
-    role: rivede una PR, legge note Calvin e propone aggiornamenti a .calvin/*
+    role: reviews a PR, reads Calvin notes and proposes .calvin/* updates
 
   update_context.yml:
-    role: applica gli aggiornamenti confermati a .calvin/conventions.yml,
-      testing.yml, decisions.yml dopo il merge
+    role: applies confirmed updates to .calvin/conventions.yml,
+      testing.yml, decisions.yml after merge
 
 templates/:
   issue_epic.md:
-    role: template corpo per epic
+    role: body template for epics
     fields: [Goal, Why, Stack, Docs, Scope, Sub-issues, Notes]
 
   issue_task.md:
-    role: template corpo per task
+    role: body template for tasks
     fields: [Goal, Parent, Stack, DB Changes, Endpoint, Entry points,
       Acceptance criteria, Dependencies, Notes, Examples]
 
   agent_prompt.md:
-    role: template commento per prompt agente denso
+    role: comment template for a dense agent prompt
     fields: [Goal, Entry points, Constraints, Tests, Depends on, Context, Examples]
-    note: il modello legge principalmente questo commento + subset di .calvin/*
+    note: the model primarily reads this comment + subset of .calvin/*
 
 bin/:
   calvin:
-    role: entry point CLI per il workflow GitHub Actions
-    run: legge numero issue, label, path .calvin/, costruisce contesto e prompt,
-      invoca Aider/LLM, esegue post-processor, apre PR
+    role: CLI entry point for the GitHub Actions workflow
+    run: reads issue number, label, .calvin/ path, builds context and prompt,
+      invokes Aider/LLM, runs post-processor, opens PRs
 
 lib/calvin/:
   context_builder.rb:
-    role: carica i file .calvin/* rilevanti e schema/logica necessaria
+    role: loads relevant .calvin/* files and necessary schema/logic
 
   prompt_builder.rb:
-    role: assembla il prompt agente da issue + contesto + agent_prompt.md
+    role: assembles the agent prompt from issue + context + agent_prompt.md
 
   post_processor.rb:
-    role: sistema le migration con filename `[timestamp]` e altri fix post-commit
+    role: fixes migrations with `[timestamp]` filenames and other post-commit fixes
 
   ci_runner.rb:
-    role: orchestration generale: legge issue, chiama builder, Aider/LLM,
-      gestisce fallback provider, aggiorna label e commenti
+    role: overall orchestration — reads issue, calls builders, Aider/LLM,
+      handles provider fallback, updates labels and comments
 
 instance_layout:
-  note: file per-repo creati dallo scenario calvanize
-  .calvin/stack.yml: tech stack + librerie chiave
-  .calvin/conventions.yml: naming, pattern, do-not-touch rules
-  .calvin/testing.yml: strategia di test e regole di coverage
-  .calvin/decisions.yml: decisioni architetturali append-only
-  .calvin/schema.yml: schema logico dei model rilevanti per i prompt
+  note: per-repo files created by the calvanize scenario
+  .calvin/stack.yml: tech stack + key libraries
+  .calvin/conventions.yml: naming, patterns, do-not-touch rules
+  .calvin/testing.yml: test strategy and coverage rules
+  .calvin/decisions.yml: append-only architectural decisions
+  .calvin/schema.yml: logical schema of models relevant for prompts
