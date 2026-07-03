@@ -4,14 +4,14 @@
 # --no-auto-commits: Aider scrive i file ma non committa.
 # Calvin fa git add + commit + push dopo rubocop.
 #
-# --subtree-only: limita la repo-map a backend/api/ per ridurre i token
-# consumati dalla mappa. Il processo gira comunque dalla root del repo
-# (working-directory: target nel workflow) quindi i path dei file
-# scritti da Aider sono sempre corretti relativamente alla root.
+# --subtree-only: limita la repo-map ai file nella dir corrente.
+# Il processo gira dalla root del repo (working-directory: target)
+# quindi .aiderignore esclude apps/, docs/, vendor/ ecc.
+# Repo-map usa il default 4000 token — necessario perché Aider
+# deve trovare i file da solo senza che glieli passiamo esplicitamente.
 #
-# --yes-always: risponde automaticamente yes a TUTTE le domande interattive
-# di Aider, incluso "add new file to chat?" per file non ancora esistenti.
-# Necessario per run headless in CI (fd=0 non è un TTY).
+# --yes-always: risponde automaticamente yes a tutte le domande
+# interattive. Necessario per run headless in CI (fd=0 non è un TTY).
 #
 # .apply(prompt) -> Success({ stdout:, tokens: }) | Failure(stderr)
 
@@ -22,8 +22,7 @@ module Calvin
   class AiderRunner
     include Dry::Monads[:result]
 
-    AIDER_MODEL  = "codestral/codestral-latest"
-    MAP_TOKENS   = "1000"
+    AIDER_MODEL = "codestral/codestral-latest"
 
     SYSTEM_PROMPT = <<~PROMPT.freeze
       You are a senior Rails developer working on an existing Rails codebase.
@@ -49,11 +48,10 @@ module Calvin
         "--no-auto-lint",
         "--no-auto-commits",
         "--subtree-only",
-        "--map-tokens",      MAP_TOKENS,
         "--message",         full_message
       ]
 
-      Calvin::LOG.info "Running aider (#{AIDER_MODEL}, --subtree-only, map-tokens: #{MAP_TOKENS})..."
+      Calvin::LOG.info "Running aider (#{AIDER_MODEL}, --subtree-only, map-tokens: default)..."
       stdout, stderr, status = Open3.capture3(env, *cmd)
       Calvin::LOG.info stdout.slice(0, 3_000) unless stdout.empty?
       Calvin::LOG.warn stderr.slice(0, 1_000) unless stderr.empty?
