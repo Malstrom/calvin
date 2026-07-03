@@ -27,12 +27,12 @@ scenarios:
       - user references a task issue number to deepen
     file: scenarios/refine_task.yml
 
-  - id: draft_agent_prompt
+  - id: agent_prompt
     triggers:
       - user wants to prepare the agent prompt for async execution
       - user says "scrivi il prompt", "prepara per il modello", "prompt agente"
       - user references a task issue number ready for execution
-    file: scenarios/draft_agent_prompt.yml
+    file: scenarios/agent_prompt.yml
 
   - id: calvanize
     triggers:
