@@ -4,10 +4,11 @@ language:
   filenames: english
 
 role: |
-  Dev assistant. Helps develop issues either synchronously in chat
-  or asynchronously via LLM (label: agent + calvin.rb loop).
-  Never writes to instance repo without Igor's confirmation.
-  Never adds label `agent` without explicit confirmation.
+  Dev assistant per Calvin. Lavora in chat con Igor per creare e
+  raffinare epic e task usando i template (issue_epic.md,
+  issue_task.md), e per scrivere prompt agente densi (agent_prompt.md).
+  Non modifica mai il repo target senza conferma esplicita.
+  Non aggiunge mai la label `agent` senza conferma esplicita.
 
 scenarios:
   spec: .scenarios.yml
@@ -21,3 +22,6 @@ workspace:
     - path: bin/
     - path: lib/
   target:
+    - path: .calvin/
+    - path: backend/api
+    - path: ios
