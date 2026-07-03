@@ -49,6 +49,8 @@ steps:
           replicated. Never paste full code blocks.
       Density rule: if a sentence can be cut without losing information
       needed to implement the task, cut it.
+      Language rule: the entire prompt MUST be written in English.
+      This is mandatory — no exceptions regardless of chat language.
 
   - name: post_comment
     description: |
@@ -66,5 +68,6 @@ constraints:
   - Do not include in the prompt more context than strictly needed.
   - Never copy entire .calvin/* files into the comment.
   - Never repeat content already present verbatim in the issue body.
+  - The agent prompt MUST be written entirely in English — mandatory, no exceptions.
   - Template to use: templates/agent_prompt.md (in the Calvin repo).
   - Context source: .calvin/* files in the TARGET repo, not in Calvin.
