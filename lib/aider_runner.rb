@@ -4,6 +4,9 @@
 # --no-auto-commits: Aider scrive i file ma non committa.
 # Calvin fa git add + commit + push dopo rubocop.
 #
+# --edit-format diff: permette ad Aider di creare file nuovi senza
+# doverli aggiungere alla chat prima (whole format non crea file nuovi).
+#
 # --yes-always: risponde automaticamente yes a tutte le domande
 # interattive. Necessario per run headless in CI (fd=0 non è un TTY).
 #
@@ -38,13 +41,14 @@ module Calvin
       cmd = [
         "aider",
         "--model",           AIDER_MODEL,
+        "--edit-format",     "diff",
         "--yes-always",
         "--no-auto-lint",
         "--no-auto-commits",
         "--message",         full_message
       ]
 
-      Calvin::LOG.info "Running aider (#{AIDER_MODEL})..."
+      Calvin::LOG.info "Running aider (#{AIDER_MODEL}, edit-format: diff)..."
       stdout, stderr, status = Open3.capture3(env, *cmd)
       Calvin::LOG.info stdout.slice(0, 3_000) unless stdout.empty?
       Calvin::LOG.warn stderr.slice(0, 1_000) unless stderr.empty?
@@ -58,8 +62,6 @@ module Calvin
 
     private
 
-    # Estrae i token dall'ultima riga di riepilogo di Aider.
-    # Formato tipico: "Tokens: 1234 sent, 567 received. Cost: $0.0089"
     def extract_tokens(text)
       line = text.lines.reverse.find { |l| l.match?(/Tokens:/i) }
       return {} unless line
