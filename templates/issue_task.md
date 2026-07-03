@@ -10,6 +10,32 @@
 
 - [ ] backend
 - [ ] ios
+- [ ] frontend
+
+## DB Changes
+
+<!-- omit if no schema changes -->
+
+- Migration: [description or none]
+- Model changes: [new columns, validations, associations or none]
+
+## Endpoint
+
+<!-- omit if no HTTP endpoint is created or modified -->
+
+- Method: [GET | POST | PATCH | DELETE]
+- Path: [e.g. /api/v1/auth/guest]
+- Auth required: [yes | no]
+- Request body: `{ field: type, ... }`
+- Response [2xx]: `{ field: type, ... }`
+- Response [4xx]: `{ error: { code, message } }`
+
+## Entry points
+
+<!-- files, classes or routes that are the starting point for implementation -->
+
+- `path/to/file.rb` — [role]
+- `path/to/other.rb` — [role]
 
 ## Acceptance criteria
 
@@ -22,4 +48,10 @@
 
 ## Notes
 
-[extra context, constraints, links — optional]
+<!-- edge cases, gotchas, do-not-touch rules — optional -->
+
+## Examples
+
+<!-- references to existing code that must be replicated or adapted -->
+
+- `path/to/existing.rb` — [one line summary of what to replicate]
