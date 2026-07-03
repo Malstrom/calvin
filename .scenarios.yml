@@ -4,42 +4,49 @@ scenarios:
       - first message of the conversation
       - user wants project status or summary
       - user asks what is open or pending
-    file: frameworks/calvin/scenarios/session_start.yml
+    file: scenarios/session_start.yml
 
   - id: create_epic
     triggers:
       - user wants to create an epic
       - user says "crea epic", "crea issue madre", "apri epic"
       - triggered after reasoning in chat about a feature
-    file: frameworks/calvin/scenarios/create_epic.yml
+    file: scenarios/create_epic.yml
 
   - id: decompose
     triggers:
       - user wants to decompose an epic into sub-issues
       - user says "decomponila", "crea sub issue", "decompose"
       - user references an epic issue number to break down
-    file: frameworks/calvin/scenarios/decompose.yml
+    file: scenarios/decompose.yml
 
-  - id: write_async_ready
+  - id: refine_task
     triggers:
-      - user wants to prepare a task for async execution
-      - user says "prepara per il modello", "async ready", "manda al modello"
-      - user references a task issue number
-    file: frameworks/calvin/scenarios/write_async_ready.yml
+      - user wants to refine a task issue
+      - user says "raffina la task", "aggiungi dettagli", "completa la descrizione"
+      - user references a task issue number to deepen
+    file: scenarios/refine_task.yml
+
+  - id: draft_agent_prompt
+    triggers:
+      - user wants to prepare the agent prompt for async execution
+      - user says "scrivi il prompt", "prepara per il modello", "prompt agente"
+      - user references a task issue number ready for execution
+    file: scenarios/draft_agent_prompt.yml
 
   - id: calvanize
     triggers:
       - user wants to bootstrap Calvin on a new repo
       - user says "calvanize", "inizializza calvin", "bootstrap calvin"
       - .calvin/ does not exist on target repo
-    file: frameworks/calvin/scenarios/calvanize.yml
+    file: scenarios/calvanize.yml
 
   - id: review_pr
     triggers:
       - user wants to review a PR
       - user references a PR number
       - user says "review", "guarda la PR", "controlla"
-    file: frameworks/calvin/scenarios/review_pr.yml
+    file: scenarios/review_pr.yml
 
   - id: update_context
     triggers:
@@ -47,9 +54,4 @@ scenarios:
       - user wants to record a decision
       - user says "aggiorna contesto", "salva decisione"
       - called from review_pr after Calvin notes confirmed
-    file: frameworks/calvin/scenarios/update_context.yml
-
-  - id: unknown
-    triggers:
-      - anything not matched above
-    file: frameworks/calvin/scenarios/unknown.yml
+    file: scenarios/update_context.yml
