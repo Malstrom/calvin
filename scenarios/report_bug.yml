@@ -1,0 +1,53 @@
+id: report_bug
+role: |
+  Bug reporting scenario. Creates a GitHub issue to trace and fix an
+  existing bug. Gathers context from chat (actual vs expected behaviour,
+  reproduction steps, files involved) and creates a structured issue in
+  the TARGET repo using templates/issue_bug.md.
+  The resulting issue is intentionally lean — Root cause, Files to touch
+  and Acceptance criteria are left as placeholders to be filled by the
+  refine_task scenario.
+
+steps:
+  - name: gather_context
+    description: |
+      Collect from chat context:
+        - Actual behaviour: what the system does wrong
+        - Expected behaviour: what it should do
+        - How to reproduce: minimal steps or failing test name
+        - Stack: backend / ios / frontend
+        - Files suspected: any files already identified in chat
+      Do not invent content. If a field cannot be filled from context,
+      leave the placeholder and flag it to Igor in chat.
+
+  - name: draft_bug_body
+    description: |
+      Draft the issue body using templates/issue_bug.md (in the Calvin repo).
+      Fill all fields that are known from context:
+        - Bug description
+        - Expected behavior
+        - How to reproduce
+        - Stack
+      Leave Root cause, Files to touch, Acceptance criteria as placeholders
+      — they will be completed by refine_task.
+
+  - name: confirm_with_igor
+    description: |
+      Show the draft to Igor in chat.
+      Confirm that Bug description, Expected behavior and How to reproduce
+      are accurate before creating the issue.
+
+  - name: create_issue
+    description: |
+      Create the issue in the TARGET repo (e.g. synca) using the confirmed body.
+      Apply label `bug` automatically.
+      Do NOT apply labels `epic`, `task`, or `agent`.
+
+constraints:
+  - MUST use templates/issue_bug.md as body structure. Never create a blank bug issue.
+  - Apply label `bug` only. Never add `epic`, `task`, or `agent`.
+  - Root cause, Files to touch, Acceptance criteria MUST be left as placeholders
+    at creation — they are filled by refine_task, not here.
+  - Template to use: templates/issue_bug.md (in the Calvin repo).
+  - Target repo: workspace.target in .agent.yml.
+  - refine_task can be applied to bug issues exactly as it would to task issues.

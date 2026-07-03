@@ -20,11 +20,19 @@ scenarios:
       - user references an epic issue number to break down
     file: scenarios/decompose.yml
 
+  - id: report_bug
+    triggers:
+      - user wants to report a bug
+      - user says "report bug", "traccia il bug", "crea issue bug", "apri bug"
+      - user describes unexpected behaviour in the system
+    file: scenarios/report_bug.yml
+
   - id: refine_task
     triggers:
       - user wants to refine a task issue
       - user says "raffina la task", "aggiungi dettagli", "completa la descrizione"
       - user references a task issue number to deepen
+      - user references a bug issue number to deepen
     file: scenarios/refine_task.yml
 
   - id: agent_prompt
