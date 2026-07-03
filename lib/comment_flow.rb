@@ -1,9 +1,15 @@
 # frozen_string_literal: true
 # Gestisce il flusso agent:
 # prompt → Mistral → commento markdown sull'issue
+#
+# .run → Success(comment_url) | Failure(msg)
+
+require "dry/monads"
 
 module Calvin
   class CommentFlow
+    include Dry::Monads[:result]
+
     def initialize(github, issue, prompt)
       @github = github
       @issue  = issue
@@ -15,25 +21,24 @@ module Calvin
 
       comment = <<~MD
         <!-- calvin-status -->
-        ## \u{1F4E4} Prompt inviato a Mistral
+        ## 📤 Risposta Calvin
 
-        <details><summary>Espandi prompt</summary>
+        #{notes}
+
+        <details><summary>Prompt inviato</summary>
 
         ```
         #{@prompt}
         ```
 
         </details>
-
-        ---
-
-        ## \u{1F916} Risposta Mistral
-
-        #{notes}
       MD
 
       @github.post_status(@issue, comment)
       Calvin::LOG.info "##{@issue.number} done"
+      Success(:comment_posted)
+    rescue StandardError => e
+      Failure("CommentFlow error: #{e.message}")
     end
   end
 end

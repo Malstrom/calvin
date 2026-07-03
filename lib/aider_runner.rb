@@ -1,24 +1,35 @@
 # frozen_string_literal: true
 # Wrapper per Aider CLI.
-# Riceve il prompt della issue e lascia che Aider legga il repo-map,
-# generi il codice e scriva i file autonomamente.
 #
 # --no-auto-commits: Aider scrive i file ma non committa.
-# Calvin fa git add + commit + push dopo il CI verde.
+# Calvin fa git add + commit + push dopo i test verdi.
+#
+# .apply(prompt) → Success(:aider_done) | Failure(stderr)
 
 require "open3"
+require "dry/monads"
 
 module Calvin
   class AiderRunner
+    include Dry::Monads[:result]
+
     AIDER_MODEL = "codestral/codestral-latest"
+
+    # Sei un assistente Rails senior specializzato nell'implementare
+    # feature in codebase Rails esistenti. Segui le istruzioni del prompt
+    # alla lettera senza aggiungere codice non richiesto.
+    SYSTEM_PROMPT = <<~PROMPT.freeze
+      You are a senior Rails developer working on an existing Rails codebase.
+      Implement exactly what is described in the task.
+      Follow existing conventions, naming patterns, and code style.
+      Do not add unrequested files, specs, or comments.
+      Write clean, idiomatic Ruby. Prefer simple solutions over clever ones.
+    PROMPT
 
     def initialize(api_key: ENV.fetch("MISTRAL_API_KEY"))
       @api_key = api_key
     end
 
-    # Passa il prompt ad Aider. Aider legge il repo-map, decide quali file
-    # creare o modificare, genera il codice e lo scrive su disco.
-    # Ritorna true se il comando esce con status 0, false altrimenti.
     def apply(prompt)
       env = { "CODESTRAL_API_KEY" => @api_key }
 
@@ -28,6 +39,7 @@ module Calvin
         "--yes",
         "--no-auto-lint",
         "--no-auto-commits",
+        "--system-prompt",   SYSTEM_PROMPT,
         "--message",         prompt
       ]
 
@@ -35,7 +47,8 @@ module Calvin
       stdout, stderr, status = Open3.capture3(env, *cmd)
       Calvin::LOG.info stdout unless stdout.empty?
       Calvin::LOG.warn stderr unless stderr.empty?
-      status.success?
+
+      status.success? ? Success(:aider_done) : Failure("Aider fallito (exit #{status.exitstatus}):\n#{stderr.slice(0, 2_000)}")
     end
   end
 end

@@ -7,12 +7,16 @@ module Calvin
       @client = Octokit::Client.new(access_token: ENV.fetch("GITHUB_TOKEN"))
     end
 
-    # Ritorna l'issue dal repo target per numero
     def fetch_issue(number)
       @client.issue(REPO, number)
     end
 
-    # Aggiorna o crea il commento di stato di Calvin sull'issue
+    # Ritorna tutti i commenti dell'issue
+    def issue_comments(issue)
+      @client.issue_comments(REPO, issue.number)
+    end
+
+    # Aggiorna o crea il commento di stato Calvin sull'issue
     def post_status(issue, msg)
       marker   = "<!-- calvin-status -->"
       body     = "#{marker}\n#{msg}"
