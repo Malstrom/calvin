@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 # Gestisce il flusso agent-aider con dry-monads Do notation.
 #
-# Il prompt viene letto dal commento <!-- agent-prompt --> sull'issue.
+# Il prompt viene letto dall'ultimo commento sull'issue.
 # Non usa ContextBuilder né PromptBuilder.
 #
 # Steps:
@@ -40,21 +40,17 @@ module Calvin
 
     private
 
-    # Legge il commento più recente contenente il marker <!-- agent-prompt -->.
-    # Sei un assistente Rails senior che legge le istruzioni di implementazione
-    # scritte da un developer umano nel commento e le passa ad Aider.
+    # Legge l'ultimo commento sull'issue e lo usa come prompt per Aider.
     def fetch_agent_prompt
-      marker   = "<!-- agent-prompt -->"
       comments = @github.issue_comments(@issue)
-      comment  = comments.reverse.find { |c| c.body.include?(marker) }
 
-      unless comment
-        return Failure("Nessun commento agent-prompt trovato sull'issue ##{@issue.number}. " \
-                       "Aggiungi un commento con il marker <!-- agent-prompt --> " \
-                       "e le istruzioni per Aider.")
+      if comments.empty?
+        return Failure("Nessun commento trovato sull'issue ##{@issue.number}. " \
+                       "Aggiungi un commento con le istruzioni per Aider prima di aggiungere il label agent-aider.")
       end
 
-      Calvin::LOG.info "agent-prompt trovato (#{comment.body.bytesize} bytes)"
+      comment = comments.last
+      Calvin::LOG.info "agent-prompt: ultimo commento (#{comment.body.bytesize} bytes)"
       Success(comment.body)
     end
 
