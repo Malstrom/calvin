@@ -1,34 +1,70 @@
 id: agent_prompt
 role: |
-  Agent prompt writing scenario. Starts from a refined task (issue_task.md
-  complete) and .calvin/*, and produces a structured comment using
-  agent_prompt.md, meant to be read by the model during async execution.
+  Agent prompt writing scenario. Starts from a refined task issue
+  (filled with templates/issue_task.md) and the .calvin/* files from
+  the target repo, and produces a structured comment posted on the
+  issue using templates/agent_prompt.md as schema.
+  The comment must be as dense as possible (no wasted tokens) but
+  also as descriptive as possible so the model can implement the task
+  without guessing. It must never duplicate content already present
+  in the issue body.
 
 steps:
   - name: read_issue_task
     description: |
-      Read the task issue body, with Goal, Stack, Endpoint, Entry points,
-      Acceptance criteria, Examples.
+      Read the task issue body (written using templates/issue_task.md).
+      Note which fields are already filled: Goal, Stack, Endpoint,
+      Entry points, Acceptance criteria, Examples. These must NOT be
+      repeated verbatim in the agent prompt comment.
+
   - name: select_calvin_context
     description: |
-      Select only relevant parts of .calvin/conventions.yml,
-      .calvin/testing.yml, .calvin/decisions.yml, .calvin/schema.yml,
-      avoiding copying everything.
+      Read only the relevant parts of .calvin/* from the TARGET repo
+      (e.g. synca/backend/api/.calvin/). Do not read from the Calvin
+      repo itself. Files to check:
+        - .calvin/conventions.yml  — naming rules, patterns, anti-patterns
+        - .calvin/testing.yml      — test strategy, fixture catalogue
+        - .calvin/decisions.yml    — architectural decisions relevant to the task
+        - .calvin/schema.yml       — model schema relevant to the task
+        - .calvin/stack.yml        — only if stack is ambiguous for this task
+      Select only the sections that directly affect how this specific
+      task must be implemented. Do not serialize entire files.
+
   - name: build_agent_prompt
     description: |
-      Fill agent_prompt.md with Goal, Entry points, Constraints, Tests,
-      Depends on, Context, Examples, avoiding repetition of text already
-      present in the issue.
+      Fill templates/agent_prompt.md with:
+        - Goal: one concrete sentence, not a copy of the issue Goal
+          unless it is already maximally dense.
+        - Entry points: max 5 files/class/route strictly needed.
+          If more are needed, the task is too wide.
+        - Constraints: only the rules from .calvin/conventions.yml
+          relevant to this task (not the full file).
+        - Tests: what to test and how, from .calvin/testing.yml,
+          specific to this task.
+        - Depends on: issue or PR numbers to respect.
+        - Context: only information NOT already in the issue body
+          but critical to avoid mistakes.
+        - Examples: precise references to existing code (controller,
+          contract, job, test) with a short summary of what must be
+          replicated. Never paste full code blocks.
+      Density rule: if a sentence can be cut without losing information
+      needed to implement the task, cut it.
+
   - name: post_comment
     description: |
-      Post the comment on the issue using agent_prompt.md as structure,
-      without modifying the issue body.
+      Post the filled agent_prompt.md as a comment on the issue.
+      Do NOT modify the issue body.
+
   - name: confirm_and_label
     description: |
-      Ask Igor for confirmation in chat; only after confirmation, add the
-      `agent` or `agent-aider` label to trigger the workflow.
+      Show the comment to Igor in chat for a final check.
+      Only after explicit confirmation, add label `agent` or
+      `agent-aider` to trigger the GitHub Actions workflow.
 
 constraints:
   - Do not modify the issue body in this scenario.
-  - Do not include more context in the prompt than strictly necessary
-    for the task.
+  - Do not include in the prompt more context than strictly needed.
+  - Never copy entire .calvin/* files into the comment.
+  - Never repeat content already present verbatim in the issue body.
+  - Template to use: templates/agent_prompt.md (in the Calvin repo).
+  - Context source: .calvin/* files in the TARGET repo, not in Calvin.
