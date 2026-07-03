@@ -2,15 +2,13 @@
 # Gestisce il flusso agent-aider con dry-monads Do notation.
 #
 # Steps:
-#   fetch_agent_prompt -> setup_branch -> aider -> rubocop autocorrect
+#   setup_branch -> aider -> rubocop autocorrect
 #   -> squash_commit -> push_branch -> open_pr
+#
+# Il prompt viene ricevuto già pronto dall'orchestratore (via ContextBuilder).
 #
 # In ogni caso (successo o failure) viene postato un report sull'issue
 # e scritto il GITHUB_STEP_SUMMARY per il tab Summary del workflow.
-#
-# Token tracking:
-#   Dopo ogni run aggiorna backend/api/.calvin/aider-usage.yml (dati)
-#   e backend/api/.calvin/aider-usage.md (report Markdown leggibile).
 
 require "dry/monads"
 require "dry/monads/do"
@@ -25,27 +23,23 @@ module Calvin
     include Dry::Monads[:result]
     include Dry::Monads::Do.for(:run)
 
-    USD_TO_EUR   = 0.93
-    USAGE_YML    = "backend/api/.calvin/aider-usage.yml"
-    USAGE_MD     = "backend/api/.calvin/aider-usage.md"
-    REPO_WEB     = "https://github.com/#{ENV.fetch('GITHUB_REPOSITORY', 'Malstrom/synca')}"
+    USD_TO_EUR = 0.93
+    USAGE_YML  = "backend/api/.calvin/aider-usage.yml"
+    USAGE_MD   = "backend/api/.calvin/aider-usage.md"
+    REPO_WEB   = "https://github.com/#{ENV.fetch('GITHUB_REPOSITORY', 'Malstrom/synca')}"
 
-    # Marker che identifica un commento agent-prompt tra tutti i commenti dell'issue.
-    # Deve essere presente all'inizio del body del commento.
-    AGENT_PROMPT_MARKER = "<!-- agent-prompt -->"
-
-    def initialize(github, issue)
+    def initialize(github, issue, prompt)
       @github  = github
       @issue   = issue
+      @prompt  = prompt
       @journal = []
       @tokens  = {}
       @pr_url  = nil
     end
 
     def run
-      prompt    = yield step(:fetch_prompt) { fetch_agent_prompt }
       yield step(:setup_branch)             { setup_branch }
-      aider_out = yield step(:aider)        { AiderRunner.new.apply(prompt) }
+      aider_out = yield step(:aider)        { AiderRunner.new.apply(@prompt) }
       @tokens   = aider_out[:tokens]
       yield step(:rubocop)                  { run_rubocop }
       yield step(:commit)                   { squash_commit }
@@ -72,23 +66,6 @@ module Calvin
     end
 
     # ─── Steps ───────────────────────────────────────────────────────────────
-
-    def fetch_agent_prompt
-      comments = @github.issue_comments(@issue)
-      return Failure("Nessun commento trovato sull'issue ##{@issue.number}.") if comments.empty?
-
-      # Cerca il commento che inizia con <!-- agent-prompt -->.
-      # Questo permette di avere più commenti sull'issue (report, note, ecc.)
-      # senza che Calvin si confonda e legga il report come prompt.
-      comment = comments.find { |c| c.body.lstrip.start_with?(AGENT_PROMPT_MARKER) }
-
-      if comment.nil?
-        return Failure("Nessun commento con marker '#{AGENT_PROMPT_MARKER}' trovato sull'issue ##{@issue.number}.")
-      end
-
-      Calvin::LOG.info "agent-prompt: trovato commento ##{comment.id} (#{comment.body.bytesize} bytes)"
-      Success(comment.body)
-    end
 
     def setup_branch
       slug    = @issue.title.downcase.gsub(/[^a-z0-9]+/, "-").slice(0, 40).chomp("-")
@@ -156,18 +133,18 @@ module Calvin
       pr_number = @pr_url ? @pr_url.split("/").last.to_i : nil
 
       {
-        "issue_number" => @issue.number,
-        "issue_title"  => @issue.title,
-        "issue_url"    => "#{REPO_WEB}/issues/#{@issue.number}",
-        "pr_number"    => pr_number,
-        "pr_url"       => @pr_url,
-        "branch"       => @branch,
-        "sent_tokens"  => @tokens[:sent].to_i,
+        "issue_number"    => @issue.number,
+        "issue_title"     => @issue.title,
+        "issue_url"       => "#{REPO_WEB}/issues/#{@issue.number}",
+        "pr_number"       => pr_number,
+        "pr_url"          => @pr_url,
+        "branch"          => @branch,
+        "sent_tokens"     => @tokens[:sent].to_i,
         "received_tokens" => @tokens[:received].to_i,
-        "total_tokens" => @tokens[:sent].to_i + @tokens[:received].to_i,
-        "cost_usd"     => cost_usd.round(4),
-        "cost_eur"     => cost_eur,
-        "created_at"   => Time.now.utc.iso8601
+        "total_tokens"    => @tokens[:sent].to_i + @tokens[:received].to_i,
+        "cost_usd"        => cost_usd.round(4),
+        "cost_eur"        => cost_eur,
+        "created_at"      => Time.now.utc.iso8601
       }
     end
 
@@ -180,15 +157,15 @@ module Calvin
       max_run        = runs.max_by { |r| r["cost_eur"].to_f }
 
       {
-        "runs"           => runs.size,
-        "sent_tokens"    => total_sent,
-        "received_tokens" => total_received,
-        "total_tokens"   => total_sent + total_received,
-        "total_cost_usd" => total_cost_usd,
-        "total_cost_eur" => total_cost_eur,
-        "avg_cost_eur"   => avg_cost_eur,
+        "runs"                 => runs.size,
+        "sent_tokens"          => total_sent,
+        "received_tokens"      => total_received,
+        "total_tokens"         => total_sent + total_received,
+        "total_cost_usd"       => total_cost_usd,
+        "total_cost_eur"       => total_cost_eur,
+        "avg_cost_eur"         => avg_cost_eur,
         "most_expensive_issue" => max_run ? max_run["issue_number"] : nil,
-        "last_updated_at" => Time.now.utc.iso8601
+        "last_updated_at"      => Time.now.utc.iso8601
       }
     end
 

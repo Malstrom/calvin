@@ -31,12 +31,20 @@ aider_mode = issue.labels.map(&:name).include?("agent-aider")
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
 Calvin::LOG.info "mode: #{aider_mode ? 'aider' : 'comment'}"
 
+# Entrambi i flussi leggono il prompt dallo stesso posto:
+# il commento con marker <!-- agent-prompt --> sull'issue.
+prompt = begin
+  Calvin::ContextBuilder.build(issue, github_client: github)
+rescue => e
+  Calvin::LOG.error "ContextBuilder: #{e.message}"
+  github.post_status(issue, "\u{1F534} Calvin error\n\n```\n#{e.message}\n```")
+  exit 1
+end
+
 result =
   if aider_mode
-    Calvin::AiderFlow.new(github, issue).run
+    Calvin::AiderFlow.new(github, issue, prompt).run
   else
-    context = Calvin::ContextBuilder.build(issue)
-    prompt  = Calvin::PromptBuilder.build(issue, context)
     Calvin::CommentFlow.new(github, issue, prompt).run
   end
 
