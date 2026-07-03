@@ -9,6 +9,10 @@
 # (working-directory: target nel workflow) quindi i path dei file
 # scritti da Aider sono sempre corretti relativamente alla root.
 #
+# --yes-always: risponde automaticamente yes a TUTTE le domande interattive
+# di Aider, incluso "add new file to chat?" per file non ancora esistenti.
+# Necessario per run headless in CI (fd=0 non è un TTY).
+#
 # .apply(prompt) -> Success({ stdout:, tokens: }) | Failure(stderr)
 
 require "open3"
@@ -41,7 +45,7 @@ module Calvin
       cmd = [
         "aider",
         "--model",           AIDER_MODEL,
-        "--yes",
+        "--yes-always",
         "--no-auto-lint",
         "--no-auto-commits",
         "--subtree-only",

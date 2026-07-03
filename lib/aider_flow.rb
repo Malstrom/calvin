@@ -30,6 +30,10 @@ module Calvin
     USAGE_MD     = "backend/api/.calvin/aider-usage.md"
     REPO_WEB     = "https://github.com/#{ENV.fetch('GITHUB_REPOSITORY', 'Malstrom/synca')}"
 
+    # Marker che identifica un commento agent-prompt tra tutti i commenti dell'issue.
+    # Deve essere presente all'inizio del body del commento.
+    AGENT_PROMPT_MARKER = "<!-- agent-prompt -->"
+
     def initialize(github, issue)
       @github  = github
       @issue   = issue
@@ -73,8 +77,16 @@ module Calvin
       comments = @github.issue_comments(@issue)
       return Failure("Nessun commento trovato sull'issue ##{@issue.number}.") if comments.empty?
 
-      comment = comments.last
-      Calvin::LOG.info "agent-prompt: ultimo commento (#{comment.body.bytesize} bytes)"
+      # Cerca il commento che inizia con <!-- agent-prompt -->.
+      # Questo permette di avere più commenti sull'issue (report, note, ecc.)
+      # senza che Calvin si confonda e legga il report come prompt.
+      comment = comments.find { |c| c.body.lstrip.start_with?(AGENT_PROMPT_MARKER) }
+
+      if comment.nil?
+        return Failure("Nessun commento con marker '#{AGENT_PROMPT_MARKER}' trovato sull'issue ##{@issue.number}.")
+      end
+
+      Calvin::LOG.info "agent-prompt: trovato commento ##{comment.id} (#{comment.body.bytesize} bytes)"
       Success(comment.body)
     end
 
