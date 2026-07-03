@@ -1,34 +1,31 @@
 id: agent_prompt
 role: |
-  Agent prompt writing scenario. Starts from a refined task issue
-  (filled with templates/issue_task.md) and the .calvin/* files from
-  the target repo, and produces a structured comment posted on the
-  issue using templates/agent_prompt.md as schema.
-  The comment must be as dense as possible (no wasted tokens) but
-  also as descriptive as possible so the model can implement the task
-  without guessing. It must never duplicate content already present
-  in the issue body.
+  Agent prompt writing scenario. Starts from a refined task or bug issue
+  (filled with templates/issue_task.md) and the .calvin/* files from the
+  target repo, and produces a structured comment posted on the issue using
+  templates/agent_prompt.md as schema.
+  The comment must be as dense as possible (no wasted tokens) but also as
+  descriptive as possible so the model can implement the task without guessing.
+  It must never duplicate content already present in the issue body.
 
 steps:
   - name: read_issue_task
     description: |
-      Read the task issue body (written using templates/issue_task.md).
+      Read the task or bug issue body (written using templates/issue_task.md).
       Note which fields are already filled: Goal, Stack, Endpoint,
       Entry points, Acceptance criteria, Examples. These must NOT be
       repeated verbatim in the agent prompt comment.
 
-  - name: select_calvin_context
+  - name: read_calvin_context
     description: |
-      Read only the relevant parts of .calvin/* from the TARGET repo
-      (e.g. synca/backend/api/.calvin/). Do not read from the Calvin
-      repo itself. Files to check:
-        - .calvin/conventions.yml  — naming rules, patterns, anti-patterns
-        - .calvin/testing.yml      — test strategy, fixture catalogue
-        - .calvin/decisions.yml    — architectural decisions relevant to the task
-        - .calvin/schema.yml       — model schema relevant to the task
-        - .calvin/stack.yml        — only if stack is ambiguous for this task
-      Select only the sections that directly affect how this specific
-      task must be implemented. Do not serialize entire files.
+      Read ALL .calvin/* files from the TARGET repo (e.g. synca/backend/api/.calvin/):
+        - .calvin/conventions.yml
+        - .calvin/testing.yml
+        - .calvin/decisions.yml
+        - .calvin/schema.yml
+        - .calvin/stack.yml
+      These files are small and act as the authoritative spec — never skim
+      or partially read them. Always read them fully before writing the prompt.
 
   - name: build_agent_prompt
     description: |
@@ -38,14 +35,15 @@ steps:
         - Entry points: max 5 files/class/route strictly needed.
           If more are needed, the task is too wide.
         - Constraints: only the rules from .calvin/conventions.yml
-          relevant to this task (not the full file).
+          and .calvin/decisions.yml relevant to this task (not the full files).
         - Tests: what to test and how, from .calvin/testing.yml,
           specific to this task.
         - Depends on: issue or PR numbers to respect.
         - Context: only information NOT already in the issue body
-          but critical to avoid mistakes.
+          but critical to avoid mistakes (e.g. enum + migration pairing,
+          testing mandate, fixture_enum_rule).
         - Examples: precise references to existing code (controller,
-          contract, job, test) with a short summary of what must be
+          contract, job, test, migration) with a short summary of what must be
           replicated. Never paste full code blocks.
       Density rule: if a sentence can be cut without losing information
       needed to implement the task, cut it.
@@ -70,4 +68,4 @@ constraints:
   - Never repeat content already present verbatim in the issue body.
   - The agent prompt MUST be written entirely in English — mandatory, no exceptions.
   - Template to use: templates/agent_prompt.md (in the Calvin repo).
-  - Context source: .calvin/* files in the TARGET repo, not in Calvin.
+  - Context source: .calvin/* files in the TARGET repo (read fully), not in Calvin.

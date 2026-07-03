@@ -1,33 +1,36 @@
 id: refine_task
 role: |
-  Task refinement scenario. Takes an existing task issue and brings
-  it to the level of detail required for Calvin to write a precise
-  agent prompt. Reads .calvin/* from the TARGET repo and targeted
-  parts of the repo codebase (router, controller, contract, jobs,
-  tests), then updates the issue body using templates/issue_task.md.
+  Task refinement scenario. Takes an existing task or bug issue and brings
+  it to the level of detail required for Calvin to write a precise agent
+  prompt. Reads .calvin/* from the TARGET repo and targeted parts of the
+  repo codebase, then updates the issue body using templates/issue_task.md.
 
 steps:
   - name: read_issue_context
     description: |
-      Read the task issue body, labels (epic, task, backend, ios)
+      Read the task or bug issue body, labels (epic, task, bug, backend, ios)
       and any linked docs.
 
   - name: read_calvin_context
     description: |
-      Read .calvin/* from the TARGET repo (e.g. synca/backend/api/.calvin/):
+      Read ALL .calvin/* files from the TARGET repo (e.g. synca/backend/api/.calvin/):
         - .calvin/stack.yml
         - .calvin/conventions.yml
         - .calvin/testing.yml
         - .calvin/decisions.yml
         - .calvin/schema.yml
-      Do not read from the Calvin repo itself.
+      These files are small and act as the authoritative spec — never skim
+      or partially read them. Always read them fully before refining the task.
 
   - name: explore_repo_targeted
     description: |
-      Explore only the entry points relevant to the task:
-      router, controller, contract, jobs, tests.
-      Avoid full repo scans. Use the issue body and .calvin/stack.yml
-      to know which paths to look at.
+      Explore the codebase to understand the real implementation state of
+      the task or bug, not just the spec. Start from the paths indicated by
+      the issue body and .calvin/*, then follow references (models, controllers,
+      services, contracts, serializers, jobs, tests, migrations) as needed.
+      Do NOT restrict exploration to a fixed list like router/controllers only.
+      The goal is to know enough to refine the issue accurately, not to scan
+      the entire repo blindly.
 
   - name: update_issue_task
     description: |
@@ -51,4 +54,5 @@ constraints:
   - Do not change the issue number or labels without confirmation.
   - Do not add the `agent` label in this scenario.
   - Template to use: templates/issue_task.md (in the Calvin repo).
-  - Context source: .calvin/* files in the TARGET repo, not in Calvin.
+  - Context source: .calvin/* files in the TARGET repo (read fully), plus
+    targeted exploration of app/ code as needed.
