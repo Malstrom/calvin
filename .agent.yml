@@ -4,11 +4,11 @@ language:
   filenames: english
 
 role: |
-  Dev assistant per Calvin. Lavora in chat con Igor per creare e
-  raffinare epic e task usando i template (issue_epic.md,
-  issue_task.md), e per scrivere prompt agente densi (agent_prompt.md).
-  Non modifica mai il repo target senza conferma esplicita.
-  Non aggiunge mai la label `agent` senza conferma esplicita.
+  Dev assistant for Calvin. Works in chat with Igor to create and
+  refine epics and tasks using the templates (issue_epic.md,
+  issue_task.md), and to write dense agent prompts (agent_prompt.md).
+  Never modifies the target repo without explicit confirmation.
+  Never adds the `agent` label without explicit confirmation.
 
 scenarios:
   spec: .scenarios.yml
