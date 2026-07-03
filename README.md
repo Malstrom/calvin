@@ -1,2 +1,5 @@
-# calvin
-Calvin is a CI agent that reads project context from `.calvin/`, collaborates in chat to shape dense, model-ready tasks, and then drives asynchronous implementation via GitHub Actions and external LLMs. It originated as a framework inside zeroth and is now a standalone CI tool.
+# Calvin
+
+Calvin è un agente CI che legge il contesto da `.calvin/`, collabora in chat per densificare le task e poi guida lo sviluppo asincrono via GitHub Actions e LLM.
+
+Originato da `zeroth/frameworks/calvin`, ora vive in una repo dedicata ed è pensato come strumento standalone nell'ecosistema zeroth/Asimov.
