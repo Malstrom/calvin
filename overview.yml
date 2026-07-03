@@ -2,50 +2,50 @@ name: calvin
 version: 2
 status: active
 
-tag_line: "Tutta la complessità in chat. Tutta la densità nel prompt."
+tag_line: "All the complexity in chat. All the density in the prompt."
 
 purpose: >
-  Calvin è un agente CI per sviluppo asincrono. Le epic e le task vengono
-  create e raffinate in chat (scenari calvin) finché sono dense e chiare.
-  Poi Calvin costruisce un prompt agente minimale ma preciso e lo esegue via
-  GitHub Actions e Aider/LLM, aprendo PR. Le decisioni e il contesto duraturo
-  vivono in .calvin/ dentro il repo target.
+  Calvin is a CI agent for asynchronous development. Epics and tasks are
+  created and refined in chat (Calvin scenarios) until they are dense and
+  clear. Then Calvin builds a minimal but precise agent prompt and executes
+  it via GitHub Actions and Aider/LLM, opening PRs. Long-lived decisions and
+  context live in .calvin/ inside the target repo.
 
 actors:
-  igor: crea epic e task in chat, conferma gli scenari, rivede e mergea PR
-  perplexity: guida la chat, riempie i template issue_epic.md/issue_task.md,
-    scrive il prompt agente agent_prompt.md, propone aggiornamenti a .calvin/
-  calvin_cli: entrypoint in bin/calvin, legge issue + .calvin/* + agent_prompt
-    e orchestra Aider/LLM + post-processor
-  model: esegue la task via Aider/LLM, scrive note Calvin in corpo PR
+  igor: creates epics and tasks in chat, confirms scenarios, reviews and merges PRs
+  perplexity: guides chat, fills issue_epic.md/issue_task.md templates,
+    writes the agent prompt (agent_prompt.md), proposes .calvin/ updates
+  calvin_cli: entrypoint in bin/calvin, reads issue + .calvin/* + agent_prompt
+    and orchestrates Aider/LLM + post-processor
+  model: executes the task via Aider/LLM, writes Calvin notes in PR body
 
- decisions:
+decisions:
   framework_name: calvin
   instance_folder: .calvin/
-  architecture: zeroth-compliant — estratto da frameworks/calvin in zeroth,
-    ora repo dedicata
+  architecture: zeroth-compliant — extracted from frameworks/calvin in zeroth,
+    now a dedicated repo
   entry_point: bin/calvin
   issue_authoring: >
-    Tutte le epic e le task vengono scritte e raffinate in chat usando
-    issue_epic.md e issue_task.md. Il prompt agente viene scritto come
-    commento strutturato (agent_prompt.md) sulla task.
+    All epics and tasks are written and refined in chat using issue_epic.md
+    and issue_task.md. The agent prompt is written as a structured comment
+    (agent_prompt.md) on the task issue.
   label_agent_gate: >
-    La label agent/agent-aider viene aggiunta solo dopo conferma esplicita
-    in chat (Igor conferma che la task e il prompt sono pronti).
+    The agent/agent-aider label is added only after explicit confirmation
+    in chat (Igor confirms the task and prompt are ready).
   async_prompt_location: >
-    Il prompt agente vive in un commento sulla issue (non nel body) e usa
-    agent_prompt.md. La issue resta leggibile per gli umani.
+    The agent prompt lives in a comment on the issue (not in the body) and
+    uses agent_prompt.md. The issue body stays human-friendly.
   feedback_loop: >
-    Il modello scrive note Calvin nel corpo PR (sezione dedicata). Gli
-    scenari review_pr e update_context usano queste note per aggiornare
+    The model writes Calvin notes in the PR body (dedicated section).
+    review_pr and update_context scenarios use these notes to update
     .calvin/conventions.yml, testing.yml, decisions.yml.
-  dependency_resolution: skip e retry nel prossimo ciclo di polling
+  dependency_resolution: skip and retry in the next polling cycle
   execution_visibility: >
-    Calvin commenta sull'issue quando parte l'esecuzione, aggiorna lo
-    stesso commento finché la PR è aperta/chiusa.
+    Calvin comments on the issue when execution starts, and updates the
+    same comment until the PR is open/closed.
   polling_language: ruby
-  engine: Option A (Calvin come prodotto CI, non gem; integra Aider ma non
-    dipende da lui in architettura).
+  engine: Option A (Calvin as a CI product, not a gem; integrates Aider but
+    is not architecturally tied to it).
   provider_default: mistral/codestral-latest
   provider_fallback:
     - cerebras/gpt-oss-120b
@@ -55,29 +55,30 @@ actors:
     - openrouter/deepseek/deepseek-chat-v4-flash:free
     - ollama/qwen2.5:32b
   context_update: >
-    Dopo ogni PR agent:review merged, Calvin legge le note dal corpo PR,
-    propone micro-PR su .calvin/* via scenario update_context. Igor conferma.
+    After every merged PR with agent:review, Calvin reads notes from the
+    PR body and proposes micro-PRs on .calvin/* via update_context.
+    Igor confirms before every write.
 
 label_lifecycle:
-  agent: set dopo conferma in chat — pronta per esecuzione asincrona
-  agent:review: set da Calvin quando apre PR
-  agent:blocked: set da Calvin quando tutti i provider falliscono
-  agent:skip: set da Igor per saltare una issue
-  epic: issue madre, decomposta in task
-  task: sub-issue eseguibile, riempita con issue_task.md
-  backend: stack Rails/backend
-  ios: stack iOS/Swift
+  agent: set after confirmation in chat — ready for async execution
+  agent:review: set by Calvin when a PR is opened
+  agent:blocked: set by Calvin when all providers fail
+  agent:skip: set by Igor to skip an issue
+  epic: parent issue, decomposed into tasks
+  task: executable sub-issue, filled using issue_task.md
+  backend: Rails/backend stack
+  ios: iOS/Swift stack
 
 issue_flow:
   epic: create_epic → decompose → N task issues
-  task: refine_task → draft_agent_prompt → label:agent → calvin_cli → PR → review_pr → merge
+  task: refine_task → agent_prompt → label:agent → calvin_cli → PR → review_pr → merge
 
 scenarios:
   - session_start
   - create_epic
   - decompose
   - refine_task
-  - draft_agent_prompt
+  - agent_prompt
   - calvanize
   - review_pr
   - update_context
