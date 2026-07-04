@@ -24,12 +24,9 @@
 
 require_relative "file_parser"
 require_relative "mistral_client"
-require_relative "rubocop_autocorrect"
 
 module Calvin
   class CiFixFlow
-    include RubocopAutocorrect
-
     STRUCTURAL_PATTERNS = [
       /NameError.*uninitialized constant/,
       /LoadError.*cannot load such file/,
@@ -145,8 +142,6 @@ module Calvin
         post_pr_comment("\u274C Calvin Fix: Codestral non ha prodotto file.")
         return :error
       end
-
-      files = autocorrect_files(files)
 
       @github.commit_files_atomically(
         files,

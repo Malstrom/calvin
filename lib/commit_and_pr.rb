@@ -9,7 +9,6 @@
 #   - creazione branch (agent/issue-{n}-{run_id})
 #   - commit atomico via GitHubClient
 #   - apertura PR con token report nel body
-#   - aggiunta label calvin-fix DOPO la creazione (per triggerare il workflow labeled)
 
 module Calvin
   module CommitAndPr
@@ -36,11 +35,6 @@ module Calvin
         body:  pr_body(issue, usage),
         head:  branch
       )
-
-      # Aggiungi il label DOPO la creazione della PR così GitHub triggera
-      # l'evento `pull_request: labeled` e parte il workflow calvin-fix.
-      @github.add_label(pr.number, "calvin-fix")
-      Calvin::LOG.info "label calvin-fix aggiunto alla PR ##{pr.number}"
 
       pr.html_url
     end

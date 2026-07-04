@@ -6,21 +6,18 @@
 #   4. Chiama Codestral (singola chiamata)
 #   5. Posta il commento sull'issue (piano + token report)
 #   6. Parsea i FILE: blocks dalla risposta
-#   7. Rubocop autocorrect sui file .rb
-#   8. Commit atomico + apre PR con token report nel body (via CommitAndPr)
+#   7. Commit atomico + apre PR con token report nel body (via CommitAndPr)
 #
 # .run → Success(pr_url) | Failure(msg)
 
 require "dry/monads"
 require_relative "file_parser"
 require_relative "commit_and_pr"
-require_relative "rubocop_autocorrect"
 
 module Calvin
   class ImplementFlow
     include Dry::Monads[:result]
     include CommitAndPr
-    include RubocopAutocorrect
 
     FILE_LIST_PATTERN   = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
     PROJECT_PROMPT_PATH = "backend/api/.calvin/prompt"
@@ -42,8 +39,6 @@ module Calvin
       files = FileParser.parse(content)
       Calvin::LOG.info "parsed #{files.size} file(s) from Codestral response"
       return Failure("No FILE: blocks found in Codestral response") if files.empty?
-
-      files = autocorrect_files(files)
 
       pr_url = commit_and_open_pr(files, issue: @issue, usage: usage)
       Calvin::LOG.info "##{@issue.number} done — PR: #{pr_url}"
