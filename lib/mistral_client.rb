@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 # Client per Mistral / Codestral API.
-# Modello: codestral-latest per tutti i flussi (comment + aider).
+# Modello: codestral-latest per tutti i flussi.
 #
-# .complete(prompt)  → String (markdown)
+# .complete(prompt)  → { content: String, usage: Hash }
+#   usage: { "prompt_tokens" => Int, "completion_tokens" => Int, "total_tokens" => Int }
 
 require "net/http"
 require "json"
@@ -19,7 +20,7 @@ module Calvin
       @api_key = api_key
     end
 
-    # Risposta markdown — usata dal flusso commento (label: agent)
+    # Returns { content: String, usage: Hash }
     def complete(prompt)
       call(prompt, model: DEFAULT_MODEL)
     end
@@ -32,17 +33,19 @@ module Calvin
       http.open_timeout = OPEN_TIMEOUT
       http.read_timeout = READ_TIMEOUT
 
-      messages = [{ role: "user", content: prompt }]
-
       req                  = Net::HTTP::Post.new(API_URL)
       req["Content-Type"]  = "application/json"
       req["Authorization"] = "Bearer #{@api_key}"
-      req.body             = { model: model, messages: messages }.to_json
+      req.body             = { model: model, messages: [{ role: "user", content: prompt }] }.to_json
 
       resp = http.request(req)
       raise "Mistral error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
-      JSON.parse(resp.body).dig("choices", 0, "message", "content")
+      body = JSON.parse(resp.body)
+      {
+        content: body.dig("choices", 0, "message", "content"),
+        usage:   body["usage"]
+      }
     end
   end
 end
