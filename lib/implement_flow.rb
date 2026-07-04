@@ -1,9 +1,14 @@
 # frozen_string_literal: true
 # Flusso di implementazione Calvin (calvin-direct):
 #   1. Inietta contenuto dei file `modified` nel prompt
-#   2. Se l'issue genera test, inietta test/test_helper.rb + test/support/ + fixture dei model
+#   2. Se l'issue genera test, inietta:
+#        - .calvin/testing.yml     (convenzioni test del progetto)
+#        - test/test_helper.rb     (classi base e helper reali)
+#        - test/support/*.rb       (se esiste)
+#        - un controller test di esempio (me_controller_test.rb)
+#        - le fixture dei model toccati dall'issue
 #   3. Aggiunge RESPONSE FORMAT (hardcodato — contratto tecnico del parser)
-#   4. Appende convenzioni progetto da backend/api/.calvin/prompt in synca (se esiste)
+#   4. Appende convenzioni progetto da .calvin/prompt (se esiste)
 #   5. Chiama Codestral (singola chiamata)
 #   6. Posta il commento sull'issue (piano + token report)
 #   7. Parsea i FILE: blocks dalla risposta
@@ -20,9 +25,11 @@ module Calvin
     include Dry::Monads[:result]
     include CommitAndPr
 
-    FILE_LIST_PATTERN   = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
-    MODEL_PATH_PATTERN  = %r{app/models/([\w/]+)\.rb}
-    PROJECT_PROMPT_PATH = "backend/api/.calvin/prompt"
+    FILE_LIST_PATTERN    = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
+    MODEL_PATH_PATTERN   = %r{app/models/([\w/]+)\.rb}
+    PROJECT_PROMPT_PATH  = ".calvin/prompt"
+    TESTING_YML_PATH     = ".calvin/testing.yml"
+    CONTROLLER_TEST_EXAMPLE = "test/controllers/api/v1/me_controller_test.rb"
 
     def initialize(github, issue, prompt)
       @github = github
@@ -57,7 +64,7 @@ module Calvin
         Calvin::LOG.info "project prompt trovato: #{PROJECT_PROMPT_PATH} (#{content.bytesize} bytes)"
         content
       else
-        Calvin::LOG.warn "project prompt non trovato: #{PROJECT_PROMPT_PATH} — continuo senza convenzioni aggiuntive"
+        Calvin::LOG.warn "project prompt non trovato: #{PROJECT_PROMPT_PATH} — continuo senza"
         nil
       end
     end
@@ -77,7 +84,6 @@ module Calvin
       end.join("\n\n")
 
       file_context = injected.empty? ? "" : "\n\n## EXISTING FILE CONTENTS\n\n#{injected}"
-
       test_context = needs_test_helpers?(prompt) ? inject_test_helpers(all_paths) : ""
 
       extra = project_prompt
@@ -105,22 +111,36 @@ module Calvin
       PROMPT
     end
 
-    # Controlla se il prompt menziona file di test o la parola "test".
     def needs_test_helpers?(prompt)
       prompt.match?(/test\//i) || prompt.match?(/\btest\b/i)
     end
 
-    # Inietta test/test_helper.rb, tutti i .rb in test/support/ (se esiste),
-    # e le fixture dei model toccati dall'issue.
+    # Inietta nel contesto tutto il necessario per scrivere test corretti:
+    #   1. .calvin/testing.yml        — convenzioni, classi base, helper, fixture catalogue
+    #   2. test/test_helper.rb        — codice reale di ApiTestCase e helpers
+    #   3. test/support/*.rb          — eventuali helper aggiuntivi
+    #   4. me_controller_test.rb      — esempio letterale di controller test da copiare
+    #   5. fixture dei model toccati  — contenuto attuale da aggiornare se necessario
     def inject_test_helpers(all_paths)
       blocks = []
 
+      # 1. testing.yml — la fonte di verità delle convenzioni test di questo progetto
+      testing_yml = @github.get_file_content(TESTING_YML_PATH)
+      if testing_yml
+        Calvin::LOG.info "injecting #{TESTING_YML_PATH}"
+        blocks << "---\n#{TESTING_YML_PATH}\n#{testing_yml}\n---"
+      else
+        Calvin::LOG.warn "#{TESTING_YML_PATH} non trovato"
+      end
+
+      # 2. test_helper.rb — classi base reali (ApiTestCase, auth_headers, json, put_json, post_json)
       helper = @github.get_file_content("test/test_helper.rb")
       if helper
         Calvin::LOG.info "injecting test/test_helper.rb"
         blocks << "---\ntest/test_helper.rb\n#{helper}\n---"
       end
 
+      # 3. test/support/*.rb — helper aggiuntivi se presenti
       support_files = @github.list_directory("test/support")
       support_files.select { |name| name.end_with?(".rb") }.each do |name|
         path    = "test/support/#{name}"
@@ -130,13 +150,28 @@ module Calvin
         blocks << "---\n#{path}\n#{content}\n---"
       end
 
-      # Inietta le fixture dei model coinvolti nell'issue
+      # 4. Esempio letterale di controller test da copiare
+      #    Iniettato solo quando l'issue include controller test
+      if needs_controller_test?(all_paths)
+        example = @github.get_file_content(CONTROLLER_TEST_EXAMPLE)
+        if example
+          Calvin::LOG.info "injecting controller test example: #{CONTROLLER_TEST_EXAMPLE}"
+          blocks << "---\nEXAMPLE — copy this exact pattern for controller tests:\n#{CONTROLLER_TEST_EXAMPLE}\n#{example}\n---"
+        end
+      end
+
+      # 5. Fixture dei model coinvolti nell'issue
       fixture_blocks = inject_model_fixtures(all_paths)
       blocks.concat(fixture_blocks)
 
       return "" if blocks.empty?
 
-      "\n\n## TEST HELPERS\n\n" + blocks.join("\n\n")
+      "\n\n## TEST CONTEXT (read carefully before writing any test)\n\n" + blocks.join("\n\n")
+    end
+
+    # Controlla se tra i path dell'issue ci sono controller test
+    def needs_controller_test?(all_paths)
+      all_paths.any? { |p| p.include?("test/controllers") }
     end
 
     # Estrae i model dai path dell'issue e inietta le fixture corrispondenti.
@@ -146,8 +181,8 @@ module Calvin
         match = path.match(MODEL_PATH_PATTERN)
         next unless match
 
-        model_name   = match[1]                           # es. "preference_profile"
-        table_name   = model_name.gsub("/", "_") + "s"   # semplice pluralizzazione
+        model_name   = match[1]
+        table_name   = model_name.gsub("/", "_") + "s"
         fixture_path = "test/fixtures/#{table_name}.yml"
 
         content = @github.get_file_content(fixture_path)
