@@ -7,7 +7,7 @@
 #   5. Posta il commento sull'issue (piano + token report)
 #   6. Parsea i FILE: blocks dalla risposta
 #   7. Rubocop autocorrect sui file .rb
-#   8. Commit atomico + apre PR  (via CommitAndPr)
+#   8. Commit atomico + apre PR con token report nel body (via CommitAndPr)
 #
 # .run → Success(pr_url) | Failure(msg)
 
@@ -45,7 +45,7 @@ module Calvin
 
       files = autocorrect_files(files)
 
-      pr_url = commit_and_open_pr(files, issue: @issue)
+      pr_url = commit_and_open_pr(files, issue: @issue, usage: usage)
       Calvin::LOG.info "##{@issue.number} done — PR: #{pr_url}"
       Success(pr_url)
     rescue StandardError => e
@@ -54,8 +54,6 @@ module Calvin
 
     private
 
-    # Legge backend/api/.calvin/prompt da synca.
-    # Logga se trovato, warn se assente.
     def project_prompt
       content = @github.get_file_content(PROJECT_PROMPT_PATH)
       if content
