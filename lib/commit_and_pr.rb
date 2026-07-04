@@ -2,19 +2,19 @@
 # Modulo condiviso tra ImplementFlow ed ExploreFlow.
 #
 # Espone:
-#   commit_and_open_pr(files, issue:, branch_prefix:, usage:) → pr_url String
+#   commit_and_open_pr(files, issue:, branch_prefix:, usage:, description:) → pr_url String
 #
 # Gestisce:
 #   - risoluzione [timestamp] nei path delle migration
 #   - creazione branch (agent/issue-{n}-{run_id})
 #   - commit atomico via GitHubClient
-#   - apertura PR con token report nel body
+#   - apertura PR con description e token report nel body
 
 require "fileutils"
 
 module Calvin
   module CommitAndPr
-    def commit_and_open_pr(files, issue:, branch_prefix: "agent", usage: nil)
+    def commit_and_open_pr(files, issue:, branch_prefix: "agent", usage: nil, description: nil)
       timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
       run_id    = ENV.fetch("GITHUB_RUN_ID", Time.now.to_i.to_s)
       branch    = "#{branch_prefix}/issue-#{issue.number}-#{run_id}"
@@ -34,7 +34,7 @@ module Calvin
 
       pr = @github.create_pull_request(
         title: "[Agent] #{issue.title}",
-        body:  pr_body(issue, usage),
+        body:  pr_body(issue, usage, description: description),
         head:  branch
       )
 
@@ -43,7 +43,7 @@ module Calvin
 
     private
 
-    def pr_body(issue, usage)
+    def pr_body(issue, usage, description: nil)
       token_section = if usage
         pt = usage["prompt_tokens"]     || 0
         ct = usage["completion_tokens"] || 0
@@ -58,10 +58,14 @@ module Calvin
         ""
       end
 
+      description_section = description || "_No description provided by agent._"
+
       <<~BODY
         Closes ##{issue.number}
 
         Implemented by Calvin via Codestral.
+
+        #{description_section}
 
         #{token_section}
       BODY

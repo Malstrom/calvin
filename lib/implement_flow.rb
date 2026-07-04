@@ -11,8 +11,8 @@
 #   4. Appende convenzioni progetto da .calvin/prompt (se esiste)
 #   5. Chiama Codestral (singola chiamata)
 #   6. Posta il commento sull'issue (piano + token report)
-#   7. Parsea i FILE: blocks dalla risposta
-#   8. Commit atomico + apre PR con token report nel body (via CommitAndPr)
+#   7. Parsea i FILE: blocks e il PR_BODY block dalla risposta
+#   8. Commit atomico + apre PR con description e token report nel body (via CommitAndPr)
 #
 # .run → Success(pr_url) | Failure(msg)
 
@@ -49,7 +49,10 @@ module Calvin
       Calvin::LOG.info "parsed #{files.size} file(s) from Codestral response"
       return Failure("No FILE: blocks found in Codestral response") if files.empty?
 
-      pr_url = commit_and_open_pr(files, issue: @issue, usage: usage)
+      description = FileParser.parse_pr_body(content)
+      Calvin::LOG.info(description ? "PR body extracted (#{description.bytesize} bytes)" : "PR body not found in response")
+
+      pr_url = commit_and_open_pr(files, issue: @issue, usage: usage, description: description)
       Calvin::LOG.info "##{@issue.number} done — PR: #{pr_url}"
       Success(pr_url)
     rescue StandardError => e
@@ -107,6 +110,28 @@ module Calvin
         - For modified files: provide the complete updated file (not a diff).
         - Use the correct language identifier in the code fence (ruby, yml, sql, etc).
         - Do not add any text between FILE: blocks.
+
+        After all FILE: blocks, provide a pull request description in this exact format:
+
+        PR_BODY_START
+        ## What this does
+        - <concise bullet describing what the implementation does>
+
+        ## Decisions made
+        - <decision taken and why — be specific, not generic>
+
+        ## Alternatives rejected
+        - <alternative approach> — <why it was not chosen>
+
+        ## Risks
+        - Product: <risk or "none">
+        - Technical: <risk or "none">
+        PR_BODY_END
+
+        Rules for PR_BODY_START/PR_BODY_END:
+        - Always include this block, even if some sections are short.
+        - Be specific: reference actual class names, field names, or design decisions from the implementation.
+        - Do not leave placeholder text like "<risk>" in the output.
         #{project_conventions}
       PROMPT
     end
@@ -120,7 +145,7 @@ module Calvin
     #   2. test/test_helper.rb        — codice reale di ApiTestCase e helpers
     #   3. test/support/*.rb          — eventuali helper aggiuntivi
     #   4. me_controller_test.rb      — esempio letterale di controller test da copiare
-    #   5. fixture dei model toccati  — contenuto attuale da aggiornare se necessario
+    #   5. fixture dei model toccati dall'issue
     def inject_test_helpers(all_paths)
       blocks = []
 
