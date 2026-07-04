@@ -6,29 +6,14 @@
 #
 # Gestisce:
 #   - risoluzione [timestamp] nei path delle migration
-#   - rubocop --autocorrect su tutti i file .rb insieme (path reali su disco)
 #   - creazione branch (agent/issue-{n}-{run_id})
 #   - commit atomico via GitHubClient
 #   - apertura PR con token report nel body
-#
-# Flusso rubocop:
-#   1. Scrivi tutti i file generati su disco (path reali nella VM effimera)
-#   2. Lancia rubocop --autocorrect una sola volta su tutti i .rb
-#      → usa il Gemfile di Calvin già installato nel workflow
-#      → rubocop vede il .rubocop.yml del progetto automaticamente
-#   3. Rileggi i file corretti da disco
-#   4. commit_files_atomically → API GitHub
-#   La VM è usa-e-getta: nessun cleanup necessario.
 
 require "fileutils"
 
 module Calvin
   module CommitAndPr
-    RUBOCOP_CMD = begin
-      gemfile = ENV["BUNDLE_GEMFILE"]
-      (gemfile && File.exist?(gemfile)) ? "BUNDLE_GEMFILE=#{gemfile} bundle exec rubocop" : "rubocop"
-    end.freeze
-
     def commit_and_open_pr(files, issue:, branch_prefix: "agent", usage: nil)
       timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
       run_id    = ENV.fetch("GITHUB_RUN_ID", Time.now.to_i.to_s)
@@ -38,13 +23,11 @@ module Calvin
         { path: f[:path].gsub("[timestamp]", timestamp), content: f[:content] }
       end
 
-      corrected = rubocop_autocorrect(resolved)
-
       @github.create_branch(branch)
-      Calvin::LOG.info "writing #{corrected.size} file(s) in atomic commit on #{branch}"
+      Calvin::LOG.info "writing #{resolved.size} file(s) in atomic commit on #{branch}"
 
       @github.commit_files_atomically(
-        corrected,
+        resolved,
         message: "feat: implement issue ##{issue.number} — #{issue.title}",
         branch:  branch
       )
@@ -59,50 +42,6 @@ module Calvin
     end
 
     private
-
-    # Scrive tutti i file su disco, lancia rubocop --autocorrect una sola volta
-    # su tutti i .rb insieme, rilegge i contenuti corretti.
-    # I file non .rb vengono restituiti invariati senza toccare il disco.
-    def rubocop_autocorrect(files)
-      rb_files = files.select { |f| f[:path].end_with?(".rb") }
-      other    = files.reject { |f| f[:path].end_with?(".rb") }
-
-      if rb_files.empty?
-        Calvin::LOG.info "rubocop: nessun file .rb — skip"
-        return files
-      end
-
-      # 1. Scrivi su disco (path reali)
-      rb_files.each do |f|
-        full_path = File.join(Dir.pwd, f[:path])
-        FileUtils.mkdir_p(File.dirname(full_path))
-        File.write(full_path, f[:content])
-        Calvin::LOG.info "rubocop: scritto su disco #{f[:path]}"
-      end
-
-      # 2. Lancia rubocop --autocorrect su tutti i path insieme
-      paths_str = rb_files.map { |f| File.join(Dir.pwd, f[:path]) }.join(" ")
-      cmd = "#{RUBOCOP_CMD} --autocorrect --no-color -f quiet #{paths_str} 2>&1"
-      Calvin::LOG.info "rubocop: #{cmd[0..160]}"
-      out = `#{cmd}`
-      exit_code = $?.exitstatus
-
-      # exit 0 = no offenses, exit 1 = offenses trovati e corretti, exit 2+ = errore
-      if exit_code <= 1
-        Calvin::LOG.info "rubocop autocorrect completato (exit #{exit_code})"
-      else
-        Calvin::LOG.warn "rubocop exit #{exit_code}: #{out[0..300]}"
-      end
-
-      # 3. Rileggi i file corretti da disco
-      corrected_rb = rb_files.map do |f|
-        full_path = File.join(Dir.pwd, f[:path])
-        content   = File.exist?(full_path) ? File.read(full_path) : f[:content]
-        { path: f[:path], content: content }
-      end
-
-      corrected_rb + other
-    end
 
     def pr_body(issue, usage)
       token_section = if usage
