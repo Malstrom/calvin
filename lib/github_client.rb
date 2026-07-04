@@ -37,12 +37,18 @@ module Calvin
       nil
     end
 
-    # Crea o aggiorna un file nel repo sul branch specificato
+    # Crea o aggiorna un file nel repo sul branch specificato.
+    # Cerca il SHA prima sul branch, poi su main — cosi' i file gia'
+    # esistenti su main vengono aggiornati con diff visibili nella PR.
     def create_or_update_file(path, content, message, branch)
       existing = begin
         @client.contents(REPO, path: path, ref: branch)
       rescue Octokit::NotFound
-        nil
+        begin
+          @client.contents(REPO, path: path, ref: "main")
+        rescue Octokit::NotFound
+          nil
+        end
       end
 
       params = { message: message, content: Base64.strict_encode64(content), branch: branch }
