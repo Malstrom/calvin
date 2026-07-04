@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 # Flusso di implementazione Calvin (calvin-direct):
 #   1. Inietta contenuto dei file `modified` nel prompt
-#   2. Aggiunge RESPONSE FORMAT (hardcodato — contratto tecnico del parser)
-#   3. Appende convenzioni progetto da backend/api/.calvin/prompt in synca (se esiste)
-#   4. Chiama Codestral (singola chiamata)
-#   5. Posta il commento sull'issue (piano + token report)
-#   6. Parsea i FILE: blocks dalla risposta
-#   7. Commit atomico + apre PR con token report nel body (via CommitAndPr)
+#   2. Se l'issue genera test, inietta test/test_helper.rb + test/support/
+#   3. Aggiunge RESPONSE FORMAT (hardcodato — contratto tecnico del parser)
+#   4. Appende convenzioni progetto da backend/api/.calvin/prompt in synca (se esiste)
+#   5. Chiama Codestral (singola chiamata)
+#   6. Posta il commento sull'issue (piano + token report)
+#   7. Parsea i FILE: blocks dalla risposta
+#   8. Commit atomico + apre PR con token report nel body (via CommitAndPr)
 #
 # .run → Success(pr_url) | Failure(msg)
 
@@ -74,11 +75,13 @@ module Calvin
 
       file_context = injected.empty? ? "" : "\n\n## EXISTING FILE CONTENTS\n\n#{injected}"
 
+      test_context = needs_test_helpers?(prompt) ? inject_test_helpers : ""
+
       extra = project_prompt
       project_conventions = extra ? "\n\n#{extra}" : ""
 
       <<~PROMPT
-        #{prompt}#{file_context}
+        #{prompt}#{file_context}#{test_context}
 
         ## RESPONSE FORMAT
 
@@ -97,6 +100,35 @@ module Calvin
         - Do not add any text between FILE: blocks.
         #{project_conventions}
       PROMPT
+    end
+
+    # Controlla se il prompt menziona file di test o la parola "test".
+    def needs_test_helpers?(prompt)
+      prompt.match?(/test\//i) || prompt.match?(/\btest\b/i)
+    end
+
+    # Inietta test/test_helper.rb e tutti i .rb in test/support/.
+    def inject_test_helpers
+      blocks = []
+
+      helper = @github.get_file_content("test/test_helper.rb")
+      if helper
+        Calvin::LOG.info "injecting test/test_helper.rb"
+        blocks << "---\ntest/test_helper.rb\n#{helper}\n---"
+      end
+
+      support_files = @github.list_directory("test/support")
+      support_files.select { |name| name.end_with?(".rb") }.each do |name|
+        path    = "test/support/#{name}"
+        content = @github.get_file_content(path)
+        next unless content
+        Calvin::LOG.info "injecting #{path}"
+        blocks << "---\n#{path}\n#{content}\n---"
+      end
+
+      return "" if blocks.empty?
+
+      "\n\n## TEST HELPERS\n\n" + blocks.join("\n\n")
     end
 
     def post_comment(content, usage)
