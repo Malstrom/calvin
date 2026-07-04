@@ -11,6 +11,8 @@
 #
 # Nota: usa BUNDLE_GEMFILE di calvin (impostato dal workflow) per garantire
 # che rubocop sia disponibile anche quando Calvin gira nel target repo.
+# Passa --config con il .rubocop.yml del target repo (Dir.pwd, impostato dal
+# workflow come working-directory: target) per garantire parità con la CI.
 
 require "tempfile"
 
@@ -24,7 +26,17 @@ module RubocopAutocorrect
     end
   end.freeze
 
+  # Restituisce --config path se .rubocop.yml esiste nella working directory
+  # (il target repo), altrimenti stringa vuota.
+  def rubocop_config_flag
+    config = File.join(Dir.pwd, ".rubocop.yml")
+    File.exist?(config) ? "--config #{config}" : ""
+  end
+
   def autocorrect_files(files)
+    config_flag = rubocop_config_flag
+    Calvin::LOG.info "rubocop config: #{config_flag.empty? ? 'default' : config_flag}"
+
     files.map do |f|
       next f unless f[:path].end_with?(".rb")
 
@@ -33,7 +45,8 @@ module RubocopAutocorrect
           tmp.write(f[:content])
           tmp.flush
 
-          out = `#{RUBOCOP_CMD} --autocorrect --no-color -f quiet #{tmp.path} 2>&1`
+          cmd = "#{RUBOCOP_CMD} --autocorrect --no-color -f quiet #{config_flag} #{tmp.path} 2>&1"
+          out = `#{cmd}`
           if $?.success? || $?.exitstatus == 1  # exitstatus 1 = offenses found but corrected
             corrected = File.read(tmp.path)
             Calvin::LOG.info "rubocop autocorrect: #{f[:path]} (#{f[:content].lines.size} → #{corrected.lines.size} lines)"
