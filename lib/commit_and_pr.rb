@@ -14,7 +14,7 @@
 # Flusso rubocop:
 #   1. Scrivi tutti i file generati su disco (path reali nella VM effimera)
 #   2. Lancia rubocop --autocorrect una sola volta su tutti i .rb
-#      → usa il Gemfile del progetto target (stessa versione della CI)
+#      → usa il Gemfile di Calvin già installato nel workflow
 #      → rubocop vede il .rubocop.yml del progetto automaticamente
 #   3. Rileggi i file corretti da disco
 #   4. commit_files_atomically → API GitHub
@@ -24,6 +24,11 @@ require "fileutils"
 
 module Calvin
   module CommitAndPr
+    RUBOCOP_CMD = begin
+      gemfile = ENV["BUNDLE_GEMFILE"]
+      (gemfile && File.exist?(gemfile)) ? "BUNDLE_GEMFILE=#{gemfile} bundle exec rubocop" : "rubocop"
+    end.freeze
+
     def commit_and_open_pr(files, issue:, branch_prefix: "agent", usage: nil)
       timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
       run_id    = ENV.fetch("GITHUB_RUN_ID", Time.now.to_i.to_s)
@@ -40,7 +45,7 @@ module Calvin
 
       @github.commit_files_atomically(
         corrected,
-        message: "feat: implement issue ##{issue.number} \u2014 #{issue.title}",
+        message: "feat: implement issue ##{issue.number} — #{issue.title}",
         branch:  branch
       )
 
@@ -54,20 +59,6 @@ module Calvin
     end
 
     private
-
-    # Determina il comando rubocop corretto:
-    # Usa il Gemfile del progetto target (Dir.pwd/Gemfile) se esiste,
-    # così la versione è identica a quella usata dalla CI del target.
-    # Fallback al Gemfile di Calvin solo se il target non ha un Gemfile.
-    def rubocop_cmd
-      target_gemfile = File.join(Dir.pwd, "Gemfile")
-      if File.exist?(target_gemfile)
-        "BUNDLE_GEMFILE=#{target_gemfile} bundle exec rubocop"
-      else
-        calvin_gemfile = ENV["BUNDLE_GEMFILE"]
-        (calvin_gemfile && File.exist?(calvin_gemfile)) ? "BUNDLE_GEMFILE=#{calvin_gemfile} bundle exec rubocop" : "rubocop"
-      end
-    end
 
     # Scrive tutti i file su disco, lancia rubocop --autocorrect una sola volta
     # su tutti i .rb insieme, rilegge i contenuti corretti.
@@ -90,9 +81,8 @@ module Calvin
       end
 
       # 2. Lancia rubocop --autocorrect su tutti i path insieme
-      cmd_prefix = rubocop_cmd
-      paths_str  = rb_files.map { |f| File.join(Dir.pwd, f[:path]) }.join(" ")
-      cmd = "#{cmd_prefix} --autocorrect --no-color -f quiet #{paths_str} 2>&1"
+      paths_str = rb_files.map { |f| File.join(Dir.pwd, f[:path]) }.join(" ")
+      cmd = "#{RUBOCOP_CMD} --autocorrect --no-color -f quiet #{paths_str} 2>&1"
       Calvin::LOG.info "rubocop: #{cmd[0..160]}"
       out = `#{cmd}`
       exit_code = $?.exitstatus
