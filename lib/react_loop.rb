@@ -24,8 +24,9 @@ require_relative "file_parser"
 
 module Calvin
   class ReActLoop
-    MAX_TURNS   = 12
+    MAX_TURNS   = 30
     GRACE_TURNS = 2
+    NOT_FOUND_LIMIT = 3
 
     SYSTEM_PROMPT = <<~PROMPT.freeze
       Sei un senior Rails developer che esplora un codebase per implementare un task.
@@ -59,9 +60,10 @@ module Calvin
     MSG
 
     def initialize(github, issue_prompt)
-      @github        = github
-      @issue_prompt  = issue_prompt
-      @messages      = [
+      @github           = github
+      @issue_prompt     = issue_prompt
+      @mistral          = MistralClient.new
+      @messages         = [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user",   content: issue_prompt }
       ]
@@ -99,11 +101,10 @@ module Calvin
         observation = dispatch_tool(tool, args)
         Calvin::LOG.info "observation (#{tool}): #{observation[0..80]}"
 
-        # Traccia streak di NOT FOUND per anticipare done
         if observation.start_with?("ERROR: file non trovato")
           @not_found_streak += 1
-          if @not_found_streak >= 3
-            Calvin::LOG.warn "3 NOT_FOUND consecutivi — forzo implementazione"
+          if @not_found_streak >= NOT_FOUND_LIMIT
+            Calvin::LOG.warn "#{NOT_FOUND_LIMIT} NOT_FOUND consecutivi — forzo implementazione"
             return force_implement(turns)
           end
         else
@@ -114,22 +115,15 @@ module Calvin
         @messages << { role: "user",      content: "Observation: #{observation}" }
       end
 
-      # MAX_TURNS esaurite: forza implementazione con contesto raccolto
       Calvin::LOG.warn "ReAct MAX_TURNS (#{MAX_TURNS}) esaurite — forzo implementazione"
       force_implement(MAX_TURNS)
     end
 
     private
 
-    def mistral
-      @mistral ||= MistralClient.new
-    end
-
-    # Chiede esplicitamente al modello di scrivere i FILE: blocks
-    # con il contesto già accumulato in @messages.
     def force_implement(turns)
       Calvin::LOG.info "force_implement dopo #{turns} turn(s)"
-      final = mistral.complete_messages(
+      final = @mistral.complete_messages(
         @messages + [{ role: "user", content: FORCE_IMPLEMENT_MSG }]
       )[:content]
       { content: final, turns: turns }
