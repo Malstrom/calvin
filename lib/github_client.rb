@@ -45,7 +45,7 @@ module Calvin
       @client.remove_label(REPO, pr_number, label)
     end
 
-    # Ritorna il contenuto di un file dal repo (branch default) o nil se non esiste.
+    # Ritorna il contenuto di un file (branch default) o nil se non esiste.
     # Applica repo_root al path se configurato.
     def get_file_content(path)
       content = @client.contents(REPO, path: full_path(path))
@@ -54,17 +54,18 @@ module Calvin
       nil
     end
 
+    # Lista i nomi dei file/directory in un path.
+    # Path vuoto ("") = root del repo.
+    # Applica repo_root se configurato.
+    # Ritorna array di stringhe: ["app", "config", "db", ...]
+    def list_directory(path)
+      target = path.empty? ? @repo_root : full_path(path)
+      @client.contents(REPO, path: target).map(&:name)
+    rescue Octokit::NotFound
+      []
+    end
+
     # Scrive tutti i file in un unico commit atomico sul branch.
-    #
-    # files: array di { path:, content: } — path relativi a repo_root
-    # message: messaggio del commit
-    # branch: branch di destinazione (deve esistere già)
-    #
-    # Usa la Git Trees API di basso livello:
-    #   1. Crea un blob per ogni file
-    #   2. Crea un tree che li raccoglie tutti
-    #   3. Crea un commit che punta al nuovo tree
-    #   4. Sposta il branch sul nuovo commit
     def commit_files_atomically(files, message:, branch:)
       branch_data   = @client.branch(REPO, branch)
       parent_sha    = branch_data.commit.sha
