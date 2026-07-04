@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 # Flusso di implementazione Calvin (calvin-direct):
 #   1. Inietta contenuto dei file `modified` nel prompt
-#   2. Aggiunge le istruzioni sul formato FILE:
+#   2. Aggiunge le istruzioni sul formato FILE: + convenzioni test
 #   3. Chiama Codestral (singola chiamata)
 #   4. Posta il commento sull'issue (piano + token report)
 #   5. Parsea i FILE: blocks dalla risposta
@@ -22,6 +22,58 @@ module Calvin
     include RubocopAutocorrect
 
     FILE_LIST_PATTERN = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
+
+    TEST_CONVENTIONS = <<~CONVENTIONS.freeze
+      ## TEST CONVENTIONS (MANDATORY)
+
+      For every new .rb file that is NOT a test, you MUST produce the corresponding test file.
+      Test files are required output, not optional.
+
+      FIXTURES available (always use fixtures, never ActiveRecord.create in setup):
+      - users(:alice), users(:bob), users(:charlie)
+      - preference_profiles(:alice_prefs), preference_profiles(:bob_prefs)
+      - health_summaries, profiles, spark_sessions, matches
+
+      BASE CLASSES:
+      - ActiveSupport::TestCase    — for model, service, contract tests
+      - ApiTestCase                — for controller/integration tests
+
+      HELPERS available in ApiTestCase:
+      - auth_headers(user)                        — returns Authorization Bearer + Content-Type
+      - post_json(path, params:, headers:)         — POST with JSON body
+      - put_json(path, params:, headers:)          — PUT with JSON body
+      - json                                       — response.body parsed with symbolize_names: true
+
+      HELPERS available in ActiveSupport::TestCase:
+      - assert_pattern { result => Success(value) }     — for Dry::Monads results
+      - assert_pattern { result => Failure[:code, _] }
+      - include Dry::Monads[:result] if asserting Success/Failure directly
+
+      MINIMUM COVERAGE:
+      - At least one happy path + one error/edge path per public method
+      - Controllers: always test 401 (no token) + 422 (invalid params) + 200 (happy path)
+      - Do NOT re-test what is already covered in the corresponding contract test
+
+      SERVICE TEST STRUCTURE:
+        class FooServiceTest < ActiveSupport::TestCase
+          include Dry::Monads[:result]
+          setup { @user = users(:alice) }
+          test "returns Success on valid attrs" do ... end
+          test "returns Failure on invalid attrs" do ... end
+        end
+
+      CONTROLLER TEST STRUCTURE:
+        class Api::V1::Signals::FooControllerTest < ApiTestCase
+          setup do
+            @user = users(:alice)
+            @headers = auth_headers(@user)
+            @valid_params = { ... }
+          end
+          test "POST /api/v1/signals/foo returns 200" do ... end
+          test "POST without token returns 401" do ... end
+          test "POST with invalid params returns 422" do ... end
+        end
+    CONVENTIONS
 
     def initialize(github, issue, prompt)
       @github = github
@@ -84,11 +136,8 @@ module Calvin
         - For modified files: provide the complete updated file (not a diff).
         - Use the correct language identifier in the code fence (ruby, yml, sql, etc).
         - Do not add any text between FILE: blocks.
-        - For every new .rb file that is NOT a test, you MUST also produce a corresponding test file.
-        - Test files go in: test/models/, test/services/, test/controllers/, test/contracts/
-        - Tests use Minitest + fixtures, same style as existing tests in the repo.
-        - Cover at least 95% of the public methods: one happy path + one error/edge path per method minimum.
-        - Do NOT skip test files — they are required output, not optional.
+
+        #{TEST_CONVENTIONS}
       PROMPT
     end
 

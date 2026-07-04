@@ -47,28 +47,64 @@ module Calvin
       - Non fare domande. Solo JSON.
 
       Dopo "done", scrivi IMMEDIATAMENTE i FILE: blocks nell'ordine:
-      1. Prima tutti i file di implementazione (model, migration, service, contract, controller, serializer)
+      1. Prima tutti i file di implementazione (migration, model, contract, service, serializer, controller, routes)
       2. Poi i file di test corrispondenti
 
-      Formato FILE: blocks:
-      FILE: path/to/file.rb
-      ```ruby
-      # contenuto completo
-      ```
+      ===== CONVENZIONI TEST (OBBLIGATORIE) =====
 
-      Regole per i test (OBBLIGATORI):
-      - Per ogni file .rb nuovo NON di test, produci il file di test corrispondente.
-      - Test path: test/models/, test/services/, test/controllers/, test/contracts/
-      - Usa Minitest + fixtures, stesso stile dei test esistenti nel repo.
-      - Copertura minima 95%: almeno un happy path + un error/edge path per ogni metodo pubblico.
-      - I file di test NON sono opzionali — sono output obbligatorio.
+      I file di test NON sono opzionali. Per ogni file .rb nuovo NON di test, produci il test corrispondente.
+
+      FIXTURES disponibili (usale sempre, non creare record con .create in setup):
+      - users(:alice), users(:bob), users(:charlie)  — utenti standard
+      - preference_profiles(:alice_prefs), preference_profiles(:bob_prefs)
+      - health_summaries, profiles, spark_sessions, matches — disponibili
+
+      CLASSI BASE:
+      - ActiveSupport::TestCase   — per model, service, contract test
+      - ApiTestCase               — per controller/integration test (eredita da ActionDispatch::IntegrationTest)
+
+      HELPER DISPONIBILI IN ApiTestCase:
+      - auth_headers(user)        — restituisce Authorization Bearer + Content-Type
+      - post_json(path, params:, headers:)  — POST con JSON body
+      - put_json(path, params:, headers:)   — PUT con JSON body
+      - json                      — response.body parsato con symbolize_names: true
+
+      HELPER DISPONIBILI IN ActiveSupport::TestCase:
+      - assert_pattern { result => Success(value) }   — per Dry::Monads
+      - assert_pattern { result => Failure[:code, _] }
+      - include Dry::Monads[:result] se usi Success/Failure nelle asserzioni
+
+      STRUTTURA STANDARD service test:
+        class FooServiceTest < ActiveSupport::TestCase
+          include Dry::Monads[:result]
+          setup { @user = users(:alice) }
+          test "returns Success on valid attrs" do ... end
+          test "returns Failure on invalid attrs" do ... end
+        end
+
+      STRUTTURA STANDARD controller test:
+        class Api::V1::Signals::FooControllerTest < ApiTestCase
+          setup do
+            @user = users(:alice)
+            @headers = auth_headers(@user)
+            @valid_params = { ... }
+          end
+          test "POST /api/v1/signals/foo returns 200" do ... end
+          test "POST senza token returns 401" do ... end
+          test "POST con params invalidi returns 422" do ... end
+        end
+
+      COPERTURA MINIMA:
+      - Almeno un happy path + un error/edge path per ogni metodo pubblico
+      - Controller: testare sempre 401 (no token) + 422 (params invalidi) + 200 (happy path)
+      - Non testare ciò che è già coperto nel contract test corrispondente
     PROMPT
 
     FORCE_IMPLEMENT_MSG = <<~MSG.freeze
       Hai esplorato abbastanza il codebase. Ora implementa il task.
-      Scrivi SUBITO i FILE: blocks con tutto il codice necessario:
-      1. Prima tutti i file di implementazione
-      2. Poi i file di test (OBBLIGATORI — copertura 95% minima)
+      Scrivi SUBITO i FILE: blocks in quest'ordine:
+      1. File di implementazione (migration, model, contract, service, serializer, controller)
+      2. File di test (OBBLIGATORI — segui le CONVENZIONI TEST nel system prompt)
       Non esplorare altro. Non fare domande.
     MSG
 
