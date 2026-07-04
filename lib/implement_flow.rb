@@ -5,7 +5,8 @@
 #   3. Chiama Codestral (una sola chiamata)
 #   4. Posta il commento sull'issue (lista file + token report)
 #   5. Parsea i FILE: blocks dalla risposta
-#   6. Scrive i file sul branch → apre PR
+#   6. Risolve [timestamp] nei path delle migration
+#   7. Scrive i file sul branch → apre PR
 #
 # .run → Success(pr_url) | Failure(msg)
 
@@ -20,9 +21,10 @@ module Calvin
     FILE_LIST_PATTERN = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
 
     def initialize(github, issue, prompt)
-      @github = github
-      @issue  = issue
-      @prompt = prompt
+      @github    = github
+      @issue     = issue
+      @prompt    = prompt
+      @timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
     end
 
     def run
@@ -91,6 +93,12 @@ module Calvin
       end
     end
 
+    # Sostituisce [timestamp] nel path con il timestamp UTC reale.
+    # Codestral a volte genera migration con [timestamp] letterale.
+    def resolve_path(path)
+      path.gsub("[timestamp]", @timestamp)
+    end
+
     # Posta il commento sull'issue con il contenuto della risposta + token report
     def post_comment(content, usage)
       token_report = if usage
@@ -122,11 +130,12 @@ module Calvin
       @github.create_branch(branch)
 
       files.each do |file|
-        Calvin::LOG.info "writing #{file[:path]}"
+        path = resolve_path(file[:path])
+        Calvin::LOG.info "writing #{path}"
         @github.create_or_update_file(
-          file[:path],
+          path,
           file[:content],
-          "feat: implement issue ##{@issue.number} \u2014 #{file[:path]}",
+          "feat: implement issue ##{@issue.number} — #{path}",
           branch
         )
       end
