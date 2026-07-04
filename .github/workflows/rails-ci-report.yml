@@ -1,0 +1,118 @@
+name: Rails CI — test report on PR
+
+# Viene chiamato dal workflow CI di synca dopo i test Rails.
+# Posta un commento sulla PR con esito, coverage e test falliti.
+# Atteso: il job chiamante esporta gli artifact `rails-test-results`
+# con i file test-output.txt e coverage.txt.
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: number
+      target_repo:
+        required: true
+        type: string
+      tests_passed:
+        required: true
+        type: boolean
+      test_output:
+        required: false
+        type: string
+        default: ""
+      coverage_line:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      SYNCA_TOKEN:
+        required: true
+
+jobs:
+  post-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post test report comment on PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.SYNCA_TOKEN }}
+          script: |
+            const pr        = ${{ inputs.pr_number }};
+            const repo      = '${{ inputs.target_repo }}';
+            const [owner, repoName] = repo.split('/');
+            const passed    = ${{ inputs.tests_passed }};
+            const rawOutput = `${{ inputs.test_output }}`;
+            const coverage  = `${{ inputs.coverage_line }}`.trim();
+
+            // ── Estrae test falliti dall'output minitest/rspec ──────────────
+            // Supporta sia "X failures, Y errors" (minitest)
+            // sia linee "rspec ... failed" (rspec)
+            const failLines = rawOutput
+              .split('\n')
+              .filter(l =>
+                /FAIL|Error:|Failure:|failed/.test(l) &&
+                !/^Running/.test(l)
+              )
+              .slice(0, 20)
+              .map(l => `> ${l.trim()}`)
+              .join('\n');
+
+            // ── Summary minitest: cerca "X runs, Y assertions, Z failures" ──
+            const summaryMatch = rawOutput.match(
+              /(\d+ runs?, \d+ assertions?[^\n]*)/
+            );
+            const summary = summaryMatch ? summaryMatch[1] : null;
+
+            // ── Coverage ────────────────────────────────────────────────────
+            const coverageLine = coverage
+              ? `**Coverage:** ${coverage}`
+              : '';
+
+            // ── Build comment ───────────────────────────────────────────────
+            const icon  = passed ? '🟢' : '🔴';
+            const title = passed ? 'Test Rails — tutti passati' : 'Test Rails — falliti';
+
+            let body = `<!-- calvin-ci-report -->\n## ${icon} ${title}\n\n`;
+
+            if (summary) body += `**${summary}**\n`;
+            if (coverageLine) body += `${coverageLine}\n`;
+
+            if (!passed && failLines) {
+              body += `\n<details><summary>Test falliti</summary>\n\n${failLines}\n\n</details>\n`;
+            }
+
+            if (rawOutput) {
+              const truncated = rawOutput.length > 4000
+                ? rawOutput.slice(-4000) + '\n... (troncato)'
+                : rawOutput;
+              body += `\n<details><summary>Output completo</summary>\n\n\`\`\`\n${truncated}\n\`\`\`\n</details>\n`;
+            }
+
+            // ── Cerca commento esistente da aggiornare (idempotente) ─────────
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo: repoName, issue_number: pr
+            });
+
+            const existing = comments.find(c =>
+              c.body.includes('<!-- calvin-ci-report -->')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo: repoName,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo: repoName,
+                issue_number: pr,
+                body
+              });
+            }
+
+            // ── GITHUB_STEP_SUMMARY ──────────────────────────────────────────
+            const fs = require('fs');
+            const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+            if (summaryPath) fs.appendFileSync(summaryPath, body);

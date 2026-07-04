@@ -74,11 +74,16 @@ module Calvin
       system("git", "checkout", "-b", @branch) ? Success(@branch) : Failure("git checkout -b #{@branch} fallito")
     end
 
+    # fix #3 — rubocop gate reale: blocca il flow se autocorrect non risolve tutto
     def run_rubocop
       Calvin::LOG.info "Rubocop autocorrect..."
       output = `bundle exec rubocop --autocorrect 2>&1`
       Calvin::LOG.info output.slice(0, 1_000)
-      Success(:rubocop_done)
+      if $?.success?
+        Success(:rubocop_done)
+      else
+        Failure("Rubocop: #{output.slice(0, 500)}")
+      end
     end
 
     def squash_commit

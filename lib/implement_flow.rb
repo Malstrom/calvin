@@ -8,6 +8,10 @@
 #   6. Risolve [timestamp] nei path delle migration
 #   7. Scrive i file sul branch → apre PR
 #
+# fix #8 — branch naming collision:
+#   Il branch usa suffix con GITHUB_RUN_ID per evitare collisioni su run rilanciate.
+#   Format: agent/issue-{number}-{run_id}
+#
 # .run → Success(pr_url) | Failure(msg)
 
 require "dry/monads"
@@ -124,9 +128,18 @@ module Calvin
       @github.post_status(@issue, comment)
     end
 
+    # fix #8 — branch naming collision:
+    # Usa GITHUB_RUN_ID come suffix per garantire unicità su run rilanciate.
+    # Evita il rescue silenzioso su Octokit::UnprocessableEntity (branch già esistente
+    # con file parziali da una run precedente fallita).
+    def branch_name
+      run_id = ENV.fetch("GITHUB_RUN_ID", Time.now.to_i.to_s)
+      "agent/issue-#{@issue.number}-#{run_id}"
+    end
+
     # Crea il branch e scrive tutti i file via GitHub API
     def write_files_to_branch(files)
-      branch = "agent/issue-#{@issue.number}"
+      branch = branch_name
       @github.create_branch(branch)
 
       files.each do |file|
