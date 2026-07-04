@@ -27,10 +27,12 @@ module Calvin
   end
 end
 
-github = Calvin::GitHubClient.new
-issue  = github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
+github     = Calvin::GitHubClient.new
+issue      = github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
+aider_mode = issue.labels.map(&:name).include?("agent-aider")
 
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
+Calvin::LOG.info "mode: #{aider_mode ? 'aider' : 'implement'}"
 
 prompt = begin
   Calvin::ContextBuilder.build(issue, github_client: github)
@@ -40,7 +42,12 @@ rescue => e
   exit 1
 end
 
-result = Calvin::ImplementFlow.new(github, issue, prompt).run
+result =
+  if aider_mode
+    Calvin::AiderFlow.new(github, issue, prompt).run
+  else
+    Calvin::ImplementFlow.new(github, issue, prompt).run
+  end
 
 result.failure do |err|
   Calvin::LOG.error "FAILURE: #{err}"
