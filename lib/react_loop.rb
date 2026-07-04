@@ -17,7 +17,7 @@
 # Fallback su MAX_TURNS: forza una chiamata finale chiedendo esplicitamente
 # di implementare con il contesto già raccolto.
 #
-# .run → { content: String, turns: Integer }
+# .run → { content: String, turns: Integer, usage: Hash | nil }
 
 require "json"
 require_relative "file_parser"
@@ -82,6 +82,28 @@ module Calvin
       2. File di test (OBBLIGATORI — uno per ogni file .rb nuovo non di test,
          usa le fixture e gli helper che hai letto in .calvin/testing.yml e test/test_helper.rb)
       Non esplorare altro. Non fare domande.
+
+      Dopo tutti i FILE: blocks, scrivi obbligatoriamente una descrizione PR in questo formato:
+
+      PR_BODY_START
+      ## What this does
+      - <bullet conciso su cosa implementa questa PR>
+
+      ## Decisions made
+      - <decisione presa e perché — sii specifico, non generico>
+
+      ## Alternatives rejected
+      - <approccio alternativo> — <perché non scelto>
+
+      ## Risks
+      - Product: <rischio o "none">
+      - Technical: <rischio o "none">
+      PR_BODY_END
+
+      Regole per PR_BODY_START/PR_BODY_END:
+      - Includilo sempre, anche se alcune sezioni sono brevi.
+      - Sii specifico: cita nomi di classi, campi o decisioni reali dell'implementazione.
+      - Non lasciare testo placeholder come "<rischio>" nell'output.
     MSG
 
     def initialize(github, issue_prompt)
@@ -96,7 +118,7 @@ module Calvin
       @not_found_streak = 0
     end
 
-    # Ritorna { content: String, turns: Integer }
+    # Ritorna { content: String, turns: Integer, usage: Hash | nil }
     def run
       turns = 0
 
@@ -148,10 +170,10 @@ module Calvin
 
     def force_implement(turns)
       Calvin::LOG.info "force_implement dopo #{turns} turn(s)"
-      final = @mistral.complete_messages(
+      response = @mistral.complete_messages(
         @messages + [{ role: "user", content: FORCE_IMPLEMENT_MSG }]
-      )[:content]
-      { content: final, turns: turns }
+      )
+      { content: response[:content], turns: turns, usage: response[:usage] }
     end
 
     TOOLS = {

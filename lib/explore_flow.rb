@@ -2,8 +2,8 @@
 # Flusso autonomo Calvin (calvin-auto):
 #   1. Costruisce il prompt dall'issue (titolo + body)
 #   2. Avvia ReActLoop: il modello esplora il repo e decide cosa scrivere
-#   3. Parsea i FILE: blocks dalla risposta finale
-#   4. Commit atomico + apre PR (rubocop autocorrect incluso in CommitAndPr)
+#   3. Parsea i FILE: blocks e il PR_BODY block dalla risposta finale
+#   4. Commit atomico + apre PR con description e token report nel body
 #
 # Non usa ContextBuilder: non c'è agent-prompt scritto da Igor.
 # Il modello guida da solo l'esplorazione.
@@ -37,7 +37,12 @@ module Calvin
 
       return Failure("ExploreFlow: nessun FILE: block prodotto dal modello") if files.empty?
 
-      pr_url = commit_and_open_pr(files, issue: @issue, branch_prefix: "auto")
+      description = FileParser.parse_pr_body(result[:content])
+      usage       = result[:usage]
+      Calvin::LOG.info(description ? "PR body estratto (#{description.bytesize} bytes)" : "PR body non trovato nella risposta")
+
+      pr_url = commit_and_open_pr(files, issue: @issue, branch_prefix: "auto",
+                                         usage: usage, description: description)
       Calvin::LOG.info "##{@issue.number} done — PR: #{pr_url}"
       Success(pr_url)
     rescue StandardError => e
