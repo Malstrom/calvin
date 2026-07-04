@@ -8,10 +8,22 @@
 #
 # I file non .rb vengono restituiti invariati.
 # Se rubocop fallisce su un file, logga un warning e restituisce il file originale.
+#
+# Nota: usa BUNDLE_GEMFILE di calvin (impostato dal workflow) per garantire
+# che rubocop sia disponibile anche quando Calvin gira nel target repo.
 
 require "tempfile"
 
 module RubocopAutocorrect
+  RUBOCOP_CMD = begin
+    gemfile = ENV["BUNDLE_GEMFILE"]
+    if gemfile && File.exist?(gemfile)
+      "BUNDLE_GEMFILE=#{gemfile} bundle exec rubocop"
+    else
+      "rubocop"
+    end
+  end.freeze
+
   def autocorrect_files(files)
     files.map do |f|
       next f unless f[:path].end_with?(".rb")
@@ -21,7 +33,7 @@ module RubocopAutocorrect
           tmp.write(f[:content])
           tmp.flush
 
-          out = `rubocop --autocorrect --no-color -f quiet #{tmp.path} 2>&1`
+          out = `#{RUBOCOP_CMD} --autocorrect --no-color -f quiet #{tmp.path} 2>&1`
           if $?.success? || $?.exitstatus == 1  # exitstatus 1 = offenses found but corrected
             corrected = File.read(tmp.path)
             Calvin::LOG.info "rubocop autocorrect: #{f[:path]} (#{f[:content].lines.size} → #{corrected.lines.size} lines)"
