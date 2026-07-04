@@ -24,9 +24,12 @@
 
 require_relative "file_parser"
 require_relative "mistral_client"
+require_relative "rubocop_autocorrect"
 
 module Calvin
   class CiFixFlow
+    include RubocopAutocorrect
+
     STRUCTURAL_PATTERNS = [
       /NameError.*uninitialized constant/,
       /LoadError.*cannot load such file/,
@@ -139,9 +142,11 @@ module Calvin
 
       if files.empty?
         Calvin::LOG.warn "Nessun FILE: block prodotto da Codestral"
-        post_pr_comment("❌ Calvin Fix: Codestral non ha prodotto file.")
+        post_pr_comment("\u274C Calvin Fix: Codestral non ha prodotto file.")
         return :error
       end
+
+      files = autocorrect_files(files)
 
       @github.commit_files_atomically(
         files,
@@ -149,17 +154,17 @@ module Calvin
         branch:  @pr_branch
       )
       Calvin::LOG.info "Fix committato su #{@pr_branch}"
-      post_pr_comment("✅ **Calvin Fix applicato.** Push su `#{@pr_branch}` \u2014 attendi la CI.")
+      post_pr_comment("\u2705 **Calvin Fix applicato.** Push su `#{@pr_branch}` \u2014 attendi la CI.")
       :fixed
     rescue => e
       Calvin::LOG.error "attempt_fix error: #{e.message}"
-      post_pr_comment("❌ Calvin Fix fallito: `#{e.message}`")
+      post_pr_comment("\u274C Calvin Fix fallito: `#{e.message}`")
       :error
     end
 
     def post_unfixable_comment(error_type)
       post_pr_comment(<<~MD)
-        ⚠️ **Calvin Fix: errore non fixabile automaticamente.**
+        \u26A0\uFE0F **Calvin Fix: errore non fixabile automaticamente.**
 
         Tipo rilevato: `#{error_type}` \u2014 richiede intervento manuale.\n        Leggi lo stacktrace nel commento precedente.
       MD
