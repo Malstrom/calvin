@@ -40,6 +40,11 @@ module Calvin
       @client.add_comment(REPO, pr_number, body)
     end
 
+    # Aggiunge una label a una PR/issue
+    def add_label(number, label)
+      @client.add_labels_to_an_issue(REPO, number, [label])
+    end
+
     # Rimuove una label da una PR/issue
     def remove_label(pr_number, label)
       @client.remove_label(REPO, pr_number, label)
