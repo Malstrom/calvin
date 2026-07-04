@@ -46,65 +46,37 @@ module Calvin
       - Massimo 3 errori NOT_FOUND consecutivi prima di chiamare "done".
       - Non fare domande. Solo JSON.
 
-      Dopo "done", scrivi IMMEDIATAMENTE i FILE: blocks nell'ordine:
-      1. Prima tutti i file di implementazione (migration, model, contract, service, serializer, controller, routes)
-      2. Poi i file di test corrispondenti
+      ===== ESPLORAZIONE TEST =====
+      Prima di scrivere i test, esplora SEMPRE:
+      - test/test_helper.rb        — classi base, helper disponibili, convenzioni
+      - test/fixtures/             — lista fixture esistenti
+      - il file fixture rilevante  — per conoscere i record disponibili
+      - un test simile esistente   — per capire lo stile e riusare helper
+      Riusa helper e fixture esistenti. Crea nuovi helper/fixture solo se non esistono.
 
-      ===== CONVENZIONI TEST (OBBLIGATORIE) =====
+      ===== OUTPUT DOPO "done" =====
+      Scrivi i FILE: blocks in quest'ordine:
+      1. File di implementazione (migration, model, contract, service, serializer, controller)
+      2. File di test (OBBLIGATORI — uno per ogni file .rb nuovo non di test)
 
-      I file di test NON sono opzionali. Per ogni file .rb nuovo NON di test, produci il test corrispondente.
+      Formato:
+      FILE: path/to/file.rb
+      ```ruby
+      # contenuto completo
+      ```
 
-      FIXTURES disponibili (usale sempre, non creare record con .create in setup):
-      - users(:alice), users(:bob), users(:charlie)  — utenti standard
-      - preference_profiles(:alice_prefs), preference_profiles(:bob_prefs)
-      - health_summaries, profiles, spark_sessions, matches — disponibili
-
-      CLASSI BASE:
-      - ActiveSupport::TestCase   — per model, service, contract test
-      - ApiTestCase               — per controller/integration test (eredita da ActionDispatch::IntegrationTest)
-
-      HELPER DISPONIBILI IN ApiTestCase:
-      - auth_headers(user)        — restituisce Authorization Bearer + Content-Type
-      - post_json(path, params:, headers:)  — POST con JSON body
-      - put_json(path, params:, headers:)   — PUT con JSON body
-      - json                      — response.body parsato con symbolize_names: true
-
-      HELPER DISPONIBILI IN ActiveSupport::TestCase:
-      - assert_pattern { result => Success(value) }   — per Dry::Monads
-      - assert_pattern { result => Failure[:code, _] }
-      - include Dry::Monads[:result] se usi Success/Failure nelle asserzioni
-
-      STRUTTURA STANDARD service test:
-        class FooServiceTest < ActiveSupport::TestCase
-          include Dry::Monads[:result]
-          setup { @user = users(:alice) }
-          test "returns Success on valid attrs" do ... end
-          test "returns Failure on invalid attrs" do ... end
-        end
-
-      STRUTTURA STANDARD controller test:
-        class Api::V1::Signals::FooControllerTest < ApiTestCase
-          setup do
-            @user = users(:alice)
-            @headers = auth_headers(@user)
-            @valid_params = { ... }
-          end
-          test "POST /api/v1/signals/foo returns 200" do ... end
-          test "POST senza token returns 401" do ... end
-          test "POST con params invalidi returns 422" do ... end
-        end
-
-      COPERTURA MINIMA:
+      Test — copertura minima:
       - Almeno un happy path + un error/edge path per ogni metodo pubblico
-      - Controller: testare sempre 401 (no token) + 422 (params invalidi) + 200 (happy path)
-      - Non testare ciò che è già coperto nel contract test corrispondente
+      - Controller: sempre 401 (no token) + 422 (params invalidi) + 200 (happy path)
+      - I test NON sono opzionali.
     PROMPT
 
     FORCE_IMPLEMENT_MSG = <<~MSG.freeze
       Hai esplorato abbastanza il codebase. Ora implementa il task.
       Scrivi SUBITO i FILE: blocks in quest'ordine:
       1. File di implementazione (migration, model, contract, service, serializer, controller)
-      2. File di test (OBBLIGATORI — segui le CONVENZIONI TEST nel system prompt)
+      2. File di test (OBBLIGATORI — uno per ogni file .rb nuovo non di test,
+         usa le fixture e gli helper che hai letto in test/test_helper.rb e test/fixtures/)
       Non esplorare altro. Non fare domande.
     MSG
 

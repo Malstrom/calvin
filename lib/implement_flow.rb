@@ -26,53 +26,21 @@ module Calvin
     TEST_CONVENTIONS = <<~CONVENTIONS.freeze
       ## TEST CONVENTIONS (MANDATORY)
 
-      For every new .rb file that is NOT a test, you MUST produce the corresponding test file.
+      For every new .rb file that is NOT a test, produce the corresponding test file.
       Test files are required output, not optional.
 
-      FIXTURES available (always use fixtures, never ActiveRecord.create in setup):
-      - users(:alice), users(:bob), users(:charlie)
-      - preference_profiles(:alice_prefs), preference_profiles(:bob_prefs)
-      - health_summaries, profiles, spark_sessions, matches
-
-      BASE CLASSES:
-      - ActiveSupport::TestCase    — for model, service, contract tests
-      - ApiTestCase                — for controller/integration tests
-
-      HELPERS available in ApiTestCase:
-      - auth_headers(user)                        — returns Authorization Bearer + Content-Type
-      - post_json(path, params:, headers:)         — POST with JSON body
-      - put_json(path, params:, headers:)          — PUT with JSON body
-      - json                                       — response.body parsed with symbolize_names: true
-
-      HELPERS available in ActiveSupport::TestCase:
-      - assert_pattern { result => Success(value) }     — for Dry::Monads results
-      - assert_pattern { result => Failure[:code, _] }
-      - include Dry::Monads[:result] if asserting Success/Failure directly
+      Before writing any test:
+      - Read test/test_helper.rb to know the base classes and available helpers.
+      - Read test/fixtures/ to know which fixtures exist.
+      - Read the relevant fixture file to know the available records.
+      - Read a similar existing test to understand style and reuse helpers.
+      Reuse existing helpers and fixtures. Create new helpers or fixture entries
+      only if they do not already exist.
 
       MINIMUM COVERAGE:
-      - At least one happy path + one error/edge path per public method
-      - Controllers: always test 401 (no token) + 422 (invalid params) + 200 (happy path)
-      - Do NOT re-test what is already covered in the corresponding contract test
-
-      SERVICE TEST STRUCTURE:
-        class FooServiceTest < ActiveSupport::TestCase
-          include Dry::Monads[:result]
-          setup { @user = users(:alice) }
-          test "returns Success on valid attrs" do ... end
-          test "returns Failure on invalid attrs" do ... end
-        end
-
-      CONTROLLER TEST STRUCTURE:
-        class Api::V1::Signals::FooControllerTest < ApiTestCase
-          setup do
-            @user = users(:alice)
-            @headers = auth_headers(@user)
-            @valid_params = { ... }
-          end
-          test "POST /api/v1/signals/foo returns 200" do ... end
-          test "POST without token returns 401" do ... end
-          test "POST with invalid params returns 422" do ... end
-        end
+      - At least one happy path + one error/edge path per public method.
+      - Controllers: always test 401 (no token) + 422 (invalid params) + 200 (happy path).
+      - Do not re-test what is already covered in the corresponding contract test.
     CONVENTIONS
 
     def initialize(github, issue, prompt)
