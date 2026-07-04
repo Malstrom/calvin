@@ -35,6 +35,16 @@ module Calvin
       end
     end
 
+    # Posta un commento su una PR (pr_number == issue_number in GitHub)
+    def post_pr_comment(pr_number, body)
+      @client.add_comment(REPO, pr_number, body)
+    end
+
+    # Rimuove una label da una PR/issue
+    def remove_label(pr_number, label)
+      @client.remove_label(REPO, pr_number, label)
+    end
+
     # Ritorna il contenuto di un file dal repo (branch default) o nil se non esiste.
     # Applica repo_root al path se configurato.
     def get_file_content(path)
@@ -51,52 +61,27 @@ module Calvin
     # branch: branch di destinazione (deve esistere già)
     #
     # Usa la Git Trees API di basso livello:
-    #   1. Crea un blob per ogni file (contenuto in base64)
-    #   2. Crea un tree che li raccoglie tutti, basato sul tree del branch
+    #   1. Crea un blob per ogni file
+    #   2. Crea un tree che li raccoglie tutti
     #   3. Crea un commit che punta al nuovo tree
     #   4. Sposta il branch sul nuovo commit
-    #
-    # Risultato: N file = 1 commit invece di N commit separati.
-    # Chiamate API: N blob + 1 tree + 1 commit + 1 ref update = N+3
-    # (vs N*2 get + N create_contents = N*3 con il metodo precedente)
     def commit_files_atomically(files, message:, branch:)
-      owner, repo_name = REPO.split("/")
-
-      # SHA corrente del branch (serve come parent del nuovo commit)
-      branch_data  = @client.branch(REPO, branch)
-      parent_sha   = branch_data.commit.sha
+      branch_data   = @client.branch(REPO, branch)
+      parent_sha    = branch_data.commit.sha
       base_tree_sha = branch_data.commit.commit.tree.sha
 
-      # Crea un blob per ogni file
       tree_items = files.map do |file|
         fpath = full_path(file[:path])
         blob  = @client.create_blob(REPO, Base64.strict_encode64(file[:content]), "base64")
         Calvin::LOG.info "blob created: #{fpath} (#{blob})"
-        {
-          path: fpath,
-          mode: "100644",  # file normale
-          type: "blob",
-          sha:  blob
-        }
+        { path: fpath, mode: "100644", type: "blob", sha: blob }
       end
 
-      # Crea il tree con tutti i blob
-      new_tree = @client.create_tree(REPO, tree_items, base_tree: base_tree_sha)
-      Calvin::LOG.info "tree created: #{new_tree.sha} (#{tree_items.size} file)"
-
-      # Crea il commit
-      new_commit = @client.create_commit(
-        REPO,
-        message,
-        new_tree.sha,
-        parent_sha
-      )
-      Calvin::LOG.info "commit created: #{new_commit.sha}"
-
-      # Sposta il branch sul nuovo commit
+      new_tree   = @client.create_tree(REPO, tree_items, base_tree: base_tree_sha)
+      new_commit = @client.create_commit(REPO, message, new_tree.sha, parent_sha)
       @client.update_ref(REPO, "heads/#{branch}", new_commit.sha)
-      Calvin::LOG.info "branch #{branch} aggiornato a #{new_commit.sha}"
 
+      Calvin::LOG.info "branch #{branch} aggiornato a #{new_commit.sha}"
       new_commit.sha
     end
 
@@ -116,7 +101,6 @@ module Calvin
 
     private
 
-    # Prefissa il path con repo_root se presente
     def full_path(path)
       @repo_root.empty? ? path : "#{@repo_root}/#{path}"
     end

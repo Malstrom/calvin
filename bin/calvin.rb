@@ -1,5 +1,10 @@
 # frozen_string_literal: true
 # Orchestratore Calvin — entry point per GitHub Actions.
+#
+# Routing:
+#   CALVIN_FIX_MODE=true  → CiFixFlow  (label calvin-fix su PR)
+#   label: calvin-direct  → ImplementFlow
+#   default               → ImplementFlow
 
 require "dry/monads"
 require "octokit"
@@ -7,18 +12,12 @@ require "base64"
 require "yaml"
 require "fileutils"
 require "logger"
-require_relative "../lib/calvin_run"
 require_relative "../lib/github_client"
 require_relative "../lib/context_builder"
-require_relative "../lib/prompt_builder"
 require_relative "../lib/mistral_client"
 require_relative "../lib/file_parser"
 require_relative "../lib/implement_flow"
-require_relative "../lib/comment_flow"
-require_relative "../lib/aider_runner"
-require_relative "../lib/ci_runner"
-require_relative "../lib/pr_builder"
-require_relative "../lib/aider_flow"
+require_relative "../lib/ci_fix_flow"
 
 module Calvin
   REPO = ENV.fetch("GITHUB_REPOSITORY")
@@ -26,28 +25,38 @@ module Calvin
     l.formatter = proc { |sev, _, _, msg| "[calvin] #{sev}: #{msg}\n" }
   end
 
-  # Mappa label issue → prefisso path nel repo
+  # Mappa label issue → prefisso path nel repo target
   REPO_ROOTS = {
     "rails"   => "backend/api",
     "flutter" => "frontend/mobile"
   }.freeze
 end
 
-# Istanza temporanea senza repo_root per leggere l'issue e le sue label
-temp_github = Calvin::GitHubClient.new
-issue        = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
-labels       = issue.labels.map(&:name)
-aider_mode   = labels.include?("agent-aider")
+# ── Fix mode (label calvin-fix su PR) ─────────────────────────────────────────
+# Non fetcha issue — opera direttamente sulla PR e il suo branch.
+if ENV["CALVIN_FIX_MODE"] == "true"
+  pr_number   = ENV.fetch("PR_NUMBER").to_i
+  pr_branch   = ENV.fetch("PR_BRANCH")
+  test_output = File.read(ENV.fetch("TEST_OUTPUT_PATH", "/tmp/test-output.txt"))
 
-# Determina il repo_root dalle label
+  github = Calvin::GitHubClient.new(repo_root: "backend/api")
+  Calvin::LOG.info "fix mode — PR ##{pr_number} branch: #{pr_branch}"
+
+  result = Calvin::CiFixFlow.new(github, pr_number, pr_branch, test_output).run
+  Calvin::LOG.info "CiFixFlow result: #{result}"
+  exit(result == :error ? 1 : 0)
+end
+
+# ── Normal mode (calvin-direct) ────────────────────────────────────────────────
+temp_github = Calvin::GitHubClient.new
+issue       = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
+labels      = issue.labels.map(&:name)
+
 repo_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last || ""
 Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
 
-# Ricrea il client con il repo_root corretto
 github = Calvin::GitHubClient.new(repo_root: repo_root)
-
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
-Calvin::LOG.info "mode: #{aider_mode ? 'aider' : 'implement'}"
 
 prompt = begin
   Calvin::ContextBuilder.build(issue, github_client: github)
@@ -57,12 +66,7 @@ rescue => e
   exit 1
 end
 
-result =
-  if aider_mode
-    Calvin::AiderFlow.new(github, issue, prompt).run
-  else
-    Calvin::ImplementFlow.new(github, issue, prompt).run
-  end
+result = Calvin::ImplementFlow.new(github, issue, prompt).run
 
 result.failure do |err|
   Calvin::LOG.error "FAILURE: #{err}"

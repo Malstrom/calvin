@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 # Client per Mistral / Codestral API.
-# Modello: codestral-latest per tutti i flussi.
 #
-# .complete(prompt)  → { content: String, usage: Hash }
-#   usage: { "prompt_tokens" => Int, "completion_tokens" => Int, "total_tokens" => Int }
+# .complete(prompt)           → { content: String, usage: Hash }  — singola chiamata
+# .complete_messages(messages) → { content: String, usage: Hash }  — multi-turno (ReAct)
+#
+# usage: { "prompt_tokens" => Int, "completion_tokens" => Int, "total_tokens" => Int }
 
 require "net/http"
 require "json"
@@ -20,14 +21,20 @@ module Calvin
       @api_key = api_key
     end
 
-    # Returns { content: String, usage: Hash }
+    # Singola chiamata — prompt testuale, usato da ImplementFlow e CiFixFlow
     def complete(prompt)
-      call(prompt, model: DEFAULT_MODEL)
+      complete_messages([{ role: "user", content: prompt }])
+    end
+
+    # Multi-turno — array di messages, usato dal futuro ReAct loop (calvin-auto)
+    # messages: [{ role: "user"|"assistant"|"tool", content: String }, ...]
+    def complete_messages(messages)
+      call(messages, model: DEFAULT_MODEL)
     end
 
     private
 
-    def call(prompt, model:)
+    def call(messages, model:)
       http              = Net::HTTP.new(API_URL.host, API_URL.port)
       http.use_ssl      = true
       http.open_timeout = OPEN_TIMEOUT
@@ -36,7 +43,7 @@ module Calvin
       req                  = Net::HTTP::Post.new(API_URL)
       req["Content-Type"]  = "application/json"
       req["Authorization"] = "Bearer #{@api_key}"
-      req.body             = { model: model, messages: [{ role: "user", content: prompt }] }.to_json
+      req.body             = { model: model, messages: messages }.to_json
 
       resp = http.request(req)
       raise "Mistral error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
