@@ -25,11 +25,26 @@ module Calvin
   LOG  = Logger.new($stdout).tap do |l|
     l.formatter = proc { |sev, _, _, msg| "[calvin] #{sev}: #{msg}\n" }
   end
+
+  # Mappa label issue → prefisso path nel repo
+  REPO_ROOTS = {
+    "rails"   => "backend/api",
+    "flutter" => "frontend/mobile"
+  }.freeze
 end
 
-github     = Calvin::GitHubClient.new
-issue      = github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
-aider_mode = issue.labels.map(&:name).include?("agent-aider")
+# Istanza temporanea senza repo_root per leggere l'issue e le sue label
+temp_github = Calvin::GitHubClient.new
+issue        = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
+labels       = issue.labels.map(&:name)
+aider_mode   = labels.include?("agent-aider")
+
+# Determina il repo_root dalle label
+repo_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last || ""
+Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
+
+# Ricrea il client con il repo_root corretto
+github = Calvin::GitHubClient.new(repo_root: repo_root)
 
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
 Calvin::LOG.info "mode: #{aider_mode ? 'aider' : 'implement'}"
