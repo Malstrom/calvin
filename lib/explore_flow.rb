@@ -3,7 +3,8 @@
 #   1. Costruisce il prompt dall'issue (titolo + body)
 #   2. Avvia ReActLoop: il modello esplora il repo e decide cosa scrivere
 #   3. Parsea i FILE: blocks dalla risposta finale
-#   4. Commit atomico + apre PR  (via CommitAndPr)
+#   4. Rubocop autocorrect sui file .rb
+#   5. Commit atomico + apre PR  (via CommitAndPr)
 #
 # Non usa ContextBuilder: non c'e' agent-prompt scritto da Igor.
 # Il modello guida da solo l'esplorazione.
@@ -14,11 +15,13 @@ require "dry/monads"
 require_relative "file_parser"
 require_relative "react_loop"
 require_relative "commit_and_pr"
+require_relative "rubocop_autocorrect"
 
 module Calvin
   class ExploreFlow
     include Dry::Monads[:result]
     include CommitAndPr
+    include RubocopAutocorrect
 
     def initialize(github, issue)
       @github = github
@@ -37,6 +40,8 @@ module Calvin
 
       return Failure("ExploreFlow: nessun FILE: block prodotto dal modello") if files.empty?
 
+      files = autocorrect_files(files)
+
       pr_url = commit_and_open_pr(files, issue: @issue, branch_prefix: "auto")
       Calvin::LOG.info "##{@issue.number} done — PR: #{pr_url}"
       Success(pr_url)
@@ -46,8 +51,6 @@ module Calvin
 
     private
 
-    # Costruisce il prompt dall'issue senza agent-prompt.
-    # Fornisce contesto minimo: titolo, body, struttura top-level del repo.
     def build_issue_prompt
       top_level = @github.list_directory("").join(", ") rescue "(non disponibile)"
 

@@ -24,8 +24,8 @@ require_relative "file_parser"
 
 module Calvin
   class ReActLoop
-    MAX_TURNS   = 30
-    GRACE_TURNS = 2
+    MAX_TURNS       = 30
+    GRACE_TURNS     = 2
     NOT_FOUND_LIMIT = 3
 
     SYSTEM_PROMPT = <<~PROMPT.freeze
@@ -46,16 +46,29 @@ module Calvin
       - Massimo 3 errori NOT_FOUND consecutivi prima di chiamare "done".
       - Non fare domande. Solo JSON.
 
-      Dopo "done", scrivi IMMEDIATAMENTE i FILE: blocks:
+      Dopo "done", scrivi IMMEDIATAMENTE i FILE: blocks nell'ordine:
+      1. Prima tutti i file di implementazione (model, migration, service, contract, controller, serializer)
+      2. Poi i file di test corrispondenti
+
+      Formato FILE: blocks:
       FILE: path/to/file.rb
       ```ruby
       # contenuto completo
       ```
+
+      Regole per i test (OBBLIGATORI):
+      - Per ogni file .rb nuovo NON di test, produci il file di test corrispondente.
+      - Test path: test/models/, test/services/, test/controllers/, test/contracts/
+      - Usa Minitest + fixtures, stesso stile dei test esistenti nel repo.
+      - Copertura minima 95%: almeno un happy path + un error/edge path per ogni metodo pubblico.
+      - I file di test NON sono opzionali — sono output obbligatorio.
     PROMPT
 
     FORCE_IMPLEMENT_MSG = <<~MSG.freeze
       Hai esplorato abbastanza il codebase. Ora implementa il task.
-      Scrivi SUBITO i FILE: blocks con tutto il codice necessario.
+      Scrivi SUBITO i FILE: blocks con tutto il codice necessario:
+      1. Prima tutti i file di implementazione
+      2. Poi i file di test (OBBLIGATORI — copertura 95% minima)
       Non esplorare altro. Non fare domande.
     MSG
 

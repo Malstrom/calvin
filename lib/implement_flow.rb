@@ -5,18 +5,21 @@
 #   3. Chiama Codestral (singola chiamata)
 #   4. Posta il commento sull'issue (piano + token report)
 #   5. Parsea i FILE: blocks dalla risposta
-#   6. Commit atomico + apre PR  (via CommitAndPr)
+#   6. Rubocop autocorrect sui file .rb
+#   7. Commit atomico + apre PR  (via CommitAndPr)
 #
 # .run → Success(pr_url) | Failure(msg)
 
 require "dry/monads"
 require_relative "file_parser"
 require_relative "commit_and_pr"
+require_relative "rubocop_autocorrect"
 
 module Calvin
   class ImplementFlow
     include Dry::Monads[:result]
     include CommitAndPr
+    include RubocopAutocorrect
 
     FILE_LIST_PATTERN = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
 
@@ -37,6 +40,8 @@ module Calvin
       files = FileParser.parse(content)
       Calvin::LOG.info "parsed #{files.size} file(s) from Codestral response"
       return Failure("No FILE: blocks found in Codestral response") if files.empty?
+
+      files = autocorrect_files(files)
 
       pr_url = commit_and_open_pr(files, issue: @issue)
       Calvin::LOG.info "##{@issue.number} done — PR: #{pr_url}"
@@ -79,6 +84,11 @@ module Calvin
         - For modified files: provide the complete updated file (not a diff).
         - Use the correct language identifier in the code fence (ruby, yml, sql, etc).
         - Do not add any text between FILE: blocks.
+        - For every new .rb file that is NOT a test, you MUST also produce a corresponding test file.
+        - Test files go in: test/models/, test/services/, test/controllers/, test/contracts/
+        - Tests use Minitest + fixtures, same style as existing tests in the repo.
+        - Cover at least 95% of the public methods: one happy path + one error/edge path per method minimum.
+        - Do NOT skip test files — they are required output, not optional.
       PROMPT
     end
 
@@ -94,7 +104,7 @@ module Calvin
 
       @github.post_status(@issue, <<~MD)
         <!-- calvin-status -->
-        ## \u{1F4E4} Calvin \u2014 Implementation Plan
+        ## \u{1F4E4} Calvin — Implementation Plan
 
         #{content}
 
