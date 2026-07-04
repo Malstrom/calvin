@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 # Flusso di implementazione Calvin (calvin-direct):
 #   1. Inietta contenuto dei file `modified` nel prompt
-#   2. Aggiunge le istruzioni sul formato FILE: + convenzioni test
-#   3. Chiama Codestral (singola chiamata)
-#   4. Posta il commento sull'issue (piano + token report)
-#   5. Parsea i FILE: blocks dalla risposta
-#   6. Rubocop autocorrect sui file .rb
-#   7. Commit atomico + apre PR  (via CommitAndPr)
+#   2. Aggiunge RESPONSE FORMAT (hardcodato — contratto tecnico del parser)
+#   3. Appende convenzioni progetto da backend/api/.calvin/prompt in synca (se esiste)
+#   4. Chiama Codestral (singola chiamata)
+#   5. Posta il commento sull'issue (piano + token report)
+#   6. Parsea i FILE: blocks dalla risposta
+#   7. Rubocop autocorrect sui file .rb
+#   8. Commit atomico + apre PR  (via CommitAndPr)
 #
 # .run → Success(pr_url) | Failure(msg)
 
@@ -21,27 +22,8 @@ module Calvin
     include CommitAndPr
     include RubocopAutocorrect
 
-    FILE_LIST_PATTERN = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
-
-    TEST_CONVENTIONS = <<~CONVENTIONS.freeze
-      ## TEST CONVENTIONS (MANDATORY)
-
-      For every new .rb file that is NOT a test, produce the corresponding test file.
-      Test files are required output, not optional.
-
-      Before writing any test:
-      - Read test/test_helper.rb to know the base classes and available helpers.
-      - Read test/fixtures/ to know which fixtures exist.
-      - Read the relevant fixture file to know the available records.
-      - Read a similar existing test to understand style and reuse helpers.
-      Reuse existing helpers and fixtures. Create new helpers or fixture entries
-      only if they do not already exist.
-
-      MINIMUM COVERAGE:
-      - At least one happy path + one error/edge path per public method.
-      - Controllers: always test 401 (no token) + 422 (invalid params) + 200 (happy path).
-      - Do not re-test what is already covered in the corresponding contract test.
-    CONVENTIONS
+    FILE_LIST_PATTERN   = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
+    PROJECT_PROMPT_PATH = "backend/api/.calvin/prompt"
 
     def initialize(github, issue, prompt)
       @github = github
@@ -72,6 +54,19 @@ module Calvin
 
     private
 
+    # Legge backend/api/.calvin/prompt da synca.
+    # Logga se trovato, warn se assente.
+    def project_prompt
+      content = @github.get_file_content(PROJECT_PROMPT_PATH)
+      if content
+        Calvin::LOG.info "project prompt trovato: #{PROJECT_PROMPT_PATH} (#{content.bytesize} bytes)"
+        content
+      else
+        Calvin::LOG.warn "project prompt non trovato: #{PROJECT_PROMPT_PATH} — continuo senza convenzioni aggiuntive"
+        nil
+      end
+    end
+
     def inject_existing_files(prompt)
       modified_paths = prompt.scan(FILE_LIST_PATTERN).filter_map do |path, status|
         path.strip if status.downcase == "modified"
@@ -85,6 +80,9 @@ module Calvin
       end.join("\n\n")
 
       file_context = injected.empty? ? "" : "\n\n## EXISTING FILE CONTENTS\n\n#{injected}"
+
+      extra = project_prompt
+      project_conventions = extra ? "\n\n#{extra}" : ""
 
       <<~PROMPT
         #{prompt}#{file_context}
@@ -104,8 +102,7 @@ module Calvin
         - For modified files: provide the complete updated file (not a diff).
         - Use the correct language identifier in the code fence (ruby, yml, sql, etc).
         - Do not add any text between FILE: blocks.
-
-        #{TEST_CONVENTIONS}
+        #{project_conventions}
       PROMPT
     end
 
