@@ -6,7 +6,7 @@
 #   4. Posta il commento sull'issue (lista file + token report)
 #   5. Parsea i FILE: blocks dalla risposta
 #   6. Risolve [timestamp] nei path delle migration
-#   7. Scrive i file sul branch → apre PR
+#   7. Scrive tutti i file in un unico commit atomico sul branch -> apre PR
 #
 # fix #8 — branch naming collision:
 #   Il branch usa suffix con GITHUB_RUN_ID per evitare collisioni su run rilanciate.
@@ -130,28 +130,25 @@ module Calvin
 
     # fix #8 — branch naming collision:
     # Usa GITHUB_RUN_ID come suffix per garantire unicità su run rilanciate.
-    # Evita il rescue silenzioso su Octokit::UnprocessableEntity (branch già esistente
-    # con file parziali da una run precedente fallita).
     def branch_name
       run_id = ENV.fetch("GITHUB_RUN_ID", Time.now.to_i.to_s)
       "agent/issue-#{@issue.number}-#{run_id}"
     end
 
-    # Crea il branch e scrive tutti i file via GitHub API
+    # Crea il branch e scrive tutti i file in un unico commit atomico.
+    # Risolve i [timestamp] nei path prima di passare i file al client.
     def write_files_to_branch(files)
       branch = branch_name
       @github.create_branch(branch)
 
-      files.each do |file|
-        path = resolve_path(file[:path])
-        Calvin::LOG.info "writing #{path}"
-        @github.create_or_update_file(
-          path,
-          file[:content],
-          "feat: implement issue ##{@issue.number} — #{path}",
-          branch
-        )
+      resolved = files.map do |file|
+        { path: resolve_path(file[:path]), content: file[:content] }
       end
+
+      Calvin::LOG.info "writing #{resolved.size} file(s) in a single atomic commit"
+
+      commit_message = "feat: implement issue ##{@issue.number} \u2014 #{@issue.title}"
+      @github.commit_files_atomically(resolved, message: commit_message, branch: branch)
 
       branch
     end
