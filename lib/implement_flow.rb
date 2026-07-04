@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 # Flusso di implementazione Calvin (calvin-direct):
 #   1. Inietta contenuto dei file `modified` nel prompt
-#   2. Se l'issue genera test, inietta test/test_helper.rb + test/support/
+#   2. Se l'issue genera test, inietta test/test_helper.rb + test/support/ + fixture dei model
 #   3. Aggiunge RESPONSE FORMAT (hardcodato — contratto tecnico del parser)
 #   4. Appende convenzioni progetto da backend/api/.calvin/prompt in synca (se esiste)
 #   5. Chiama Codestral (singola chiamata)
@@ -21,6 +21,7 @@ module Calvin
     include CommitAndPr
 
     FILE_LIST_PATTERN   = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
+    MODEL_PATH_PATTERN  = %r{app/models/([\w/]+)\.rb}
     PROJECT_PROMPT_PATH = "backend/api/.calvin/prompt"
 
     def initialize(github, issue, prompt)
@@ -62,6 +63,8 @@ module Calvin
     end
 
     def inject_existing_files(prompt)
+      all_paths = prompt.scan(FILE_LIST_PATTERN).map { |path, _| path.strip }
+
       modified_paths = prompt.scan(FILE_LIST_PATTERN).filter_map do |path, status|
         path.strip if status.downcase == "modified"
       end
@@ -75,7 +78,7 @@ module Calvin
 
       file_context = injected.empty? ? "" : "\n\n## EXISTING FILE CONTENTS\n\n#{injected}"
 
-      test_context = needs_test_helpers?(prompt) ? inject_test_helpers : ""
+      test_context = needs_test_helpers?(prompt) ? inject_test_helpers(all_paths) : ""
 
       extra = project_prompt
       project_conventions = extra ? "\n\n#{extra}" : ""
@@ -107,8 +110,9 @@ module Calvin
       prompt.match?(/test\//i) || prompt.match?(/\btest\b/i)
     end
 
-    # Inietta test/test_helper.rb e tutti i .rb in test/support/.
-    def inject_test_helpers
+    # Inietta test/test_helper.rb, tutti i .rb in test/support/ (se esiste),
+    # e le fixture dei model toccati dall'issue.
+    def inject_test_helpers(all_paths)
       blocks = []
 
       helper = @github.get_file_content("test/test_helper.rb")
@@ -126,9 +130,35 @@ module Calvin
         blocks << "---\n#{path}\n#{content}\n---"
       end
 
+      # Inietta le fixture dei model coinvolti nell'issue
+      fixture_blocks = inject_model_fixtures(all_paths)
+      blocks.concat(fixture_blocks)
+
       return "" if blocks.empty?
 
       "\n\n## TEST HELPERS\n\n" + blocks.join("\n\n")
+    end
+
+    # Estrae i model dai path dell'issue e inietta le fixture corrispondenti.
+    # es. app/models/preference_profile.rb → test/fixtures/preference_profiles.yml
+    def inject_model_fixtures(paths)
+      paths.filter_map do |path|
+        match = path.match(MODEL_PATH_PATTERN)
+        next unless match
+
+        model_name   = match[1]                           # es. "preference_profile"
+        table_name   = model_name.gsub("/", "_") + "s"   # semplice pluralizzazione
+        fixture_path = "test/fixtures/#{table_name}.yml"
+
+        content = @github.get_file_content(fixture_path)
+        unless content
+          Calvin::LOG.warn "fixture non trovata: #{fixture_path}"
+          next
+        end
+
+        Calvin::LOG.info "injecting fixture: #{fixture_path}"
+        "---\n#{fixture_path}\n#{content}\n---"
+      end
     end
 
     def post_comment(content, usage)
