@@ -47,12 +47,16 @@ module Calvin
       - Non fare domande. Solo JSON.
 
       ===== ESPLORAZIONE TEST =====
-      Prima di scrivere i test, esplora SEMPRE:
-      - test/test_helper.rb        — classi base, helper disponibili, convenzioni
-      - test/fixtures/             — lista fixture esistenti
-      - il file fixture rilevante  — per conoscere i record disponibili
-      - un test simile esistente   — per capire lo stile e riusare helper
+      Prima di scrivere i test, esplora SEMPRE in questo ordine:
+      1. .calvin/testing.yml       — convenzioni, classi base (ApiTestCase), helper disponibili
+                                     (auth_headers, post_json, put_json), fixture catalogue,
+                                     pattern proibiti (es. user.jwt non esiste)
+      2. test/test_helper.rb       — definizione reale di ApiTestCase e degli helper
+      3. test/fixtures/            — lista fixture esistenti
+      4. il file fixture rilevante — per conoscere i record disponibili
+      5. un test simile esistente  — per capire lo stile e riusare helper
       Riusa helper e fixture esistenti. Crea nuovi helper/fixture solo se non esistono.
+      MAI usare user.jwt o users(:name).jwt — non esiste. Usa sempre auth_headers(users(:name)).
 
       ===== OUTPUT DOPO "done" =====
       Scrivi i FILE: blocks in quest'ordine:
@@ -76,7 +80,7 @@ module Calvin
       Scrivi SUBITO i FILE: blocks in quest'ordine:
       1. File di implementazione (migration, model, contract, service, serializer, controller)
       2. File di test (OBBLIGATORI — uno per ogni file .rb nuovo non di test,
-         usa le fixture e gli helper che hai letto in test/test_helper.rb e test/fixtures/)
+         usa le fixture e gli helper che hai letto in .calvin/testing.yml e test/test_helper.rb)
       Non esplorare altro. Non fare domande.
     MSG
 
