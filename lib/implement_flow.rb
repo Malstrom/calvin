@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 # Flusso di implementazione Calvin:
 #   1. Inietta contenuto dei file `modified` nel prompt
-#   2. Chiama Codestral (una sola chiamata)
-#   3. Posta il commento sull'issue (lista file + token report)
-#   4. Parsea i FILE: blocks dalla risposta
-#   5. Scrive i file sul branch → apre PR
+#   2. Aggiunge sempre le istruzioni sul formato FILE:
+#   3. Chiama Codestral (una sola chiamata)
+#   4. Posta il commento sull'issue (lista file + token report)
+#   5. Parsea i FILE: blocks dalla risposta
+#   6. Scrive i file sul branch → apre PR
 #
 # .run → Success(pr_url) | Failure(msg)
 
@@ -15,8 +16,7 @@ module Calvin
   class ImplementFlow
     include Dry::Monads[:result]
 
-    # Marker nel prompt che indica la lista file da modificare/creare
-    # Formato riga: `- path/to/file.rb — modified` o `— new`
+    # Formato riga lista file: `- path/to/file.rb — modified` o `— new`
     FILE_LIST_PATTERN = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
 
     def initialize(github, issue, prompt)
@@ -49,39 +49,38 @@ module Calvin
 
     private
 
-    # Legge i file `modified` dal repo e li inietta nel prompt
+    # Inietta i file `modified` esistenti e aggiunge SEMPRE le istruzioni sul formato FILE:
     def inject_existing_files(prompt)
       modified_paths = extract_modified_paths(prompt)
-      return prompt if modified_paths.empty?
 
       injected = modified_paths.filter_map do |path|
-        content = @github.get_file_content(path)
-        next unless content
+        file_content = @github.get_file_content(path)
+        next unless file_content
 
         Calvin::LOG.info "injecting existing file: #{path}"
-        "---\n#{path}\n#{content}\n---"
+        "---\n#{path}\n#{file_content}\n---"
       end.join("\n\n")
 
-      return prompt if injected.empty?
+      file_context = injected.empty? ? "" : "\n\n## EXISTING FILE CONTENTS\n\n#{injected}"
 
       <<~PROMPT
-        #{prompt}
-
-        ## EXISTING FILE CONTENTS (for modified files only)
-
-        #{injected}
+        #{prompt}#{file_context}
 
         ## RESPONSE FORMAT
 
-        For each file in the list above, provide the complete file content using this exact format:
+        For every file listed above, provide the complete file content using this exact format:
 
         FILE: path/to/file.rb
         ```ruby
         # complete file content here
         ```
 
-        For new files: provide full content.
-        For modified files: provide the complete updated file (not a diff).
+        Rules:
+        - Output one FILE: block per file, in the same order as the list above.
+        - For new files: provide full content from scratch.
+        - For modified files: provide the complete updated file (not a diff).
+        - Use the correct language identifier in the code fence (ruby, yml, sql, etc).
+        - Do not add any text between FILE: blocks.
       PROMPT
     end
 
@@ -92,7 +91,7 @@ module Calvin
       end
     end
 
-    # Posta il commento sull'issue con lista file + token report
+    # Posta il commento sull'issue con il contenuto della risposta + token report
     def post_comment(content, usage)
       token_report = if usage
         pt = usage["prompt_tokens"] || 0
@@ -105,12 +104,12 @@ module Calvin
 
       comment = <<~MD
         <!-- calvin-status -->
-        ## 📤 Calvin — Implementation Plan
+        ## \u{1F4E4} Calvin \u2014 Implementation Plan
 
         #{content}
 
         ---
-        ### 📊 Token usage
+        ### \u{1F4CA} Token usage
         #{token_report}
       MD
 
@@ -127,7 +126,7 @@ module Calvin
         @github.create_or_update_file(
           file[:path],
           file[:content],
-          "feat: implement issue ##{@issue.number} — #{file[:path]}",
+          "feat: implement issue ##{@issue.number} \u2014 #{file[:path]}",
           branch
         )
       end
