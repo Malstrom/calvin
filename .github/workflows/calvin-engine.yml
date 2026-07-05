@@ -1,8 +1,19 @@
 name: Calvin Engine
 
 on:
-  issues:
-    types: [labeled]
+  workflow_call:
+    inputs:
+      issue_number:
+        required: true
+        type: number
+      target_repo:
+        required: true
+        type: string
+    secrets:
+      SYNCA_TOKEN:
+        required: true
+      MISTRAL_API_KEY:
+        required: false
 
 jobs:
   calvin:
@@ -28,20 +39,28 @@ jobs:
       - name: Checkout calvin
         uses: actions/checkout@v4
         with:
-          path: calvin
+          repository: Malstrom/calvin
           token: ${{ secrets.SYNCA_TOKEN }}
+          path: calvin
 
-      # 2. Clona synca (target repo)
+      # 2. Clona il repo target
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
-          repository: Malstrom/synca
-          path: target
+          repository: ${{ inputs.target_repo }}
           token: ${{ secrets.SYNCA_TOKEN }}
+          path: target
 
-      # 3. Ruby — versione da synca (.ruby-version = 3.3.1).
-      #    Le gem di Calvin (octokit, dry-transaction, base64) sono nel
-      #    Gemfile di synca sotto group :development, require: false.
+      # 3. Git identity — necessaria per commit_files_atomically via Octokit
+      #    e per qualsiasi step che usi git CLI direttamente.
+      - name: Configure git identity
+        run: |
+          git config --global user.email "calvin@synca.app"
+          git config --global user.name "Calvin"
+
+      # 4. Ruby — versione da synca (.ruby-version = 3.3.1).
+      #    BUNDLE_WITH=calvin installa il gruppo :calvin (octokit, base64,
+      #    dry-transaction) definito come optional nel Gemfile di synca.
       #    Un solo bundle install, nessun setup duplicato.
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -49,26 +68,30 @@ jobs:
           ruby-version-file: target/backend/api/.ruby-version
           bundler-cache: true
           working-directory: target/backend/api
+        env:
+          BUNDLE_WITH: calvin
 
-      # 4. Prepara il database test
+      # 5. Prepara il database test
       - name: Setup test database
         run: bundle exec rails db:create db:migrate
         working-directory: target/backend/api
         env:
           RAILS_ENV: test
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/synca_test
+          BUNDLE_GEMFILE: ${{ github.workspace }}/target/backend/api/Gemfile
 
-      # 5. Esegue Calvin
-      #    BUNDLE_GEMFILE: forza Calvin a usare il Gemfile di synca (dove
-      #    octokit, dry-transaction e base64 sono gia' installati).
-      #    CALVIN_RAILS_ROOT: path assoluto della dir Rails di synca nel runner.
+      # 6. Esegue Calvin
+      #    BUNDLE_GEMFILE: forza Calvin a usare il Gemfile di synca dove le
+      #    gem :calvin sono installate (octokit, base64, dry-transaction).
+      #    CALVIN_RAILS_ROOT: path assoluto della dir Rails di synca.
       #    TestRunner e TestFixLoop lo usano per Dir.chdir prima di rails test.
       - name: Run Calvin
         run: bundle exec ruby $GITHUB_WORKSPACE/calvin/bin/calvin.rb
         working-directory: target
         env:
           BUNDLE_GEMFILE: ${{ github.workspace }}/target/backend/api/Gemfile
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          GITHUB_REPOSITORY: ${{ inputs.target_repo }}
           GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           CALVIN_MODEL: codestral-latest

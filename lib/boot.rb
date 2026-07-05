@@ -3,6 +3,7 @@
 # Tutti i require vivono qui. bin/calvin.rb non sa nulla di gem o dipendenze.
 
 require "dry/monads"
+require "dry/transaction"
 require "octokit"
 require "base64"
 require "logger"
@@ -27,6 +28,9 @@ require_relative "context_builder"
 require_relative "file_parser"
 require_relative "mistral_client"
 require_relative "commit_and_pr"
+require_relative "test_runner"
+require_relative "test_fix_prompt_builder"
+require_relative "test_fix_loop"
 require_relative "explore_flow"
 require_relative "run_reporter"
 require_relative "rubocop_autocorrect"
