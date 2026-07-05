@@ -10,7 +10,6 @@
 #
 # Il metodo .call() è mantenuto per retrocompatibilità e compone i due.
 
-require "dry/monads"
 require_relative "pr_body_builder"
 
 module Calvin
@@ -18,8 +17,6 @@ module Calvin
     include Dry::Monads[:result]
     extend self
 
-    # Crea il branch e committa i file.
-    # Ritorna Success({ branch:, files: }) con i file risolti (path senza [timestamp]).
     def commit_files(files, issue:, github:, branch_prefix: nil)
       branch_prefix ||= Calvin::CONFIG[:branch_prefix] || "auto"
       timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
@@ -44,8 +41,6 @@ module Calvin
       Failure({ step: :commit_files, error: e.message })
     end
 
-    # Apre la PR dal branch verso il default branch.
-    # labels: array di stringhe opzionale (es. ['needs-human-review']).
     def open_pr(branch, issue:, github:, usage: nil, description: nil, labels: [])
       pr = github.create_pull_request(
         title:  "[Agent] #{issue.title}",
@@ -59,7 +54,6 @@ module Calvin
       Failure({ step: :open_pr, error: e.message })
     end
 
-    # Retrocompatibilità — usato da chi chiama ancora .call() direttamente.
     def call(files:, issue:, github:, branch_prefix: nil, usage: nil, description: nil)
       commit_files(files, issue: issue, github: github, branch_prefix: branch_prefix).bind do |r|
         open_pr(r[:branch], issue: issue, github: github, usage: usage, description: description)

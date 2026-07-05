@@ -6,8 +6,10 @@
 #  2. Se tutti passano → esce con passed: true
 #  3. Se falliscono → costruisce prompt minimale (TestFixPromptBuilder)
 #     → chiama Codestral con system message → parsa i FILE: blocks → committa il fix
-#  4. Ripete fino a max_attempts
-#  5. In ogni caso ritorna { passed:, fix_attempts:, last_output: }
+#  4. Fa `git pull` per portare i file fixati sul filesystem del runner
+#     CRITICO: senza questo step il TestRunner esegue ancora il codice vecchio
+#  5. Ripete fino a max_attempts
+#  6. In ogni caso ritorna { passed:, fix_attempts:, last_output: }
 #
 # La PR viene sempre aperta dall'orchestratore (ExploreFlow) —
 # questo oggetto non sa nulla di PR o issue, solo di test e commit.
@@ -20,11 +22,6 @@
 #     mistral:        mistral_client,
 #     max_attempts:   Calvin::CONFIG.dig(:test_fix, :max_attempts) || 2
 #   ).run
-
-require "open3"
-require_relative "test_runner"
-require_relative "test_fix_prompt_builder"
-require_relative "file_parser"
 
 module Calvin
   class TestFixLoop
@@ -39,6 +36,9 @@ module Calvin
       @mistral       = mistral
       @max_attempts  = max_attempts
       @system_prompt = File.read(SYSTEM_PROMPT_PATH)
+      # Numero totale di esecuzioni dei test:
+      # 1 run iniziale + max_attempts run dopo i fix
+      @total_runs    = @max_attempts + 1
     end
 
     def run
@@ -50,21 +50,21 @@ module Calvin
         last_output = result[:output]
         run_number  = fix_attempts + 1
 
-        Calvin::LOG.info "TestFixLoop run #{run_number}/#{@max_attempts + 1}: #{result[:success] ? 'PASS' : 'FAIL'}"
+        Calvin::LOG.info "TestFixLoop run #{run_number}/#{@total_runs}: #{result[:success] ? 'PASS' : 'FAIL'}"
 
         return { passed: true,  fix_attempts: fix_attempts, last_output: last_output } if result[:success]
-
         return { passed: false, fix_attempts: fix_attempts, last_output: last_output } if fix_attempts >= @max_attempts
 
         fix_attempts += 1
         fix_and_commit(result[:failures], fix_attempts)
+        pull_fixes
       end
     end
 
     private
 
     def fix_and_commit(failures, attempt_number)
-      Calvin::LOG.info "TestFixLoop: costruisco prompt fix (attempt #{attempt_number}) per #{failures.size} failure(s)"
+      Calvin::LOG.info "TestFixLoop: costruisco prompt fix (attempt #{attempt_number}/#{@max_attempts}) per #{failures.size} failure(s)"
 
       ctx = TestFixPromptBuilder.build(
         failures:      failures,
@@ -73,9 +73,6 @@ module Calvin
         system_prompt: @system_prompt
       )
 
-      # system_prompt passato come system message — non come user message.
-      # Senza questo, le istruzioni critiche (no destroy_all, no timestamp, ecc.)
-      # non arrivano al modello.
       response = @mistral.complete_messages(
         [
           { role: "system", content: ctx[:system] },
@@ -98,6 +95,21 @@ module Calvin
       )
     rescue => e
       Calvin::LOG.warn "TestFixLoop fix_and_commit error: #{e.class} — #{e.message}"
+    end
+
+    # Porta i file committati via API sul filesystem del runner.
+    # CRITICO: commit_files_atomically scrive su GitHub via API — il checkout
+    # locale non viene aggiornato automaticamente. Senza questo pull,
+    # il run successivo di TestRunner esegue ancora il codice pre-fix.
+    def pull_fixes
+      stdout, status = Open3.capture2e(
+        "git", "-C", @rails_root, "pull", "--ff-only", "origin", @branch
+      )
+      if status.success?
+        Calvin::LOG.info "TestFixLoop: git pull OK"
+      else
+        Calvin::LOG.warn "TestFixLoop: git pull fallito — #{stdout.strip}"
+      end
     end
   end
 end
