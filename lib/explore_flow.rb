@@ -1,64 +1,44 @@
 # frozen_string_literal: true
-# Flusso autonomo Calvin (calvin-auto):
-#   1. Costruisce il prompt dall'issue (titolo + body)
-#   2. Avvia ReActLoop: il modello esplora il repo e decide cosa scrivere
-#   3. Parsea i FILE: blocks e il PR_BODY block dalla risposta finale
-#   4. Commit atomico + apre PR con description e token report nel body
+# Flusso autonomo Calvin (calvin-auto).
+# Pipeline dry-transaction con 4 step espliciti:
 #
-# Non usa ContextBuilder: non c'è agent-prompt scritto da Igor.
-# Il modello guida da solo l'esplorazione.
+#   build_prompt   — costruisce il prompt dall'issue
+#   react_loop     — ReActLoop: il modello esplora e implementa
+#   parse_files    — estrae FILE: blocks e PR_BODY
+#   commit_and_pr  — branch + commit + PR
 #
-# .run → Success(pr_url) | Failure(msg)
-# .last_usage → Hash | nil  (disponibile dopo .run, per RunReporter)
+# Ritorna:
+#   Success({ status: :success, pr_url:, branch:, files:, usage: })
+#   Failure({ step:, error:, usage: })
 
-require "dry/monads"
+require "dry/transaction"
 require_relative "file_parser"
 require_relative "react_loop"
 require_relative "commit_and_pr"
 
 module Calvin
   class ExploreFlow
-    include Dry::Monads[:result]
-    include CommitAndPr
+    include Dry::Transaction
 
-    attr_reader :last_usage
+    step :build_prompt
+    step :react_loop
+    step :parse_files
+    step :commit_and_pr
 
     def initialize(github, issue)
-      @github     = github
-      @issue      = issue
-      @last_usage = nil
+      @github = github
+      @issue  = issue
+      @usage  = nil
+      super()
     end
 
-    def run
-      prompt = build_issue_prompt
-      Calvin::LOG.info "ExploreFlow avviato per issue ##{@issue.number}"
-
-      result = ReActLoop.new(@github, prompt).run
-      Calvin::LOG.info "ReActLoop terminato in #{result[:turns]} turn(s)"
-
-      files = FileParser.parse(result[:content])
-      Calvin::LOG.info "parsed #{files.size} file(s) da ReActLoop"
-
-      return Failure("ExploreFlow: nessun FILE: block prodotto dal modello") if files.empty?
-
-      description = FileParser.parse_pr_body(result[:content])
-      @last_usage = result[:usage]
-      Calvin::LOG.info(description ? "PR body estratto (#{description.bytesize} bytes)" : "PR body non trovato nella risposta")
-
-      pr_url = commit_and_open_pr(files, issue: @issue, branch_prefix: "auto",
-                                         usage: @last_usage, description: description)
-      Calvin::LOG.info "##{@issue.number} done — PR: #{pr_url}"
-      Success(pr_url)
-    rescue StandardError => e
-      Failure("ExploreFlow error: #{e.message}")
-    end
+    attr_reader :usage
 
     private
 
-    def build_issue_prompt
+    def build_prompt(_input)
       top_level = @github.list_directory("").join(", ") rescue "(non disponibile)"
-
-      <<~PROMPT
+      prompt = <<~PROMPT
         # Task: #{@issue.title}
 
         #{@issue.body.to_s.strip}
@@ -68,6 +48,39 @@ module Calvin
 
         Esplora il repo, leggi i file rilevanti, poi implementa il task.
       PROMPT
+      Success(prompt: prompt)
+    rescue => e
+      Failure(step: :build_prompt, error: e.message, usage: nil)
+    end
+
+    def react_loop(prompt:)
+      Calvin::LOG.info "ExploreFlow: avvio ReActLoop per issue ##{@issue.number}"
+      result = ReActLoop.new(@github, prompt).run
+      Calvin::LOG.info "ReActLoop terminato in #{result[:turns]} turn(s)"
+      @usage = result[:usage]
+      Success(content: result[:content], usage: result[:usage])
+    rescue => e
+      Failure(step: :react_loop, error: e.message, usage: @usage)
+    end
+
+    def parse_files(content:, usage:)
+      files = FileParser.parse(content)
+      return Failure(step: :parse_files, error: "nessun FILE: block prodotto dal modello", usage: usage) if files.empty?
+      description = FileParser.parse_pr_body(content)
+      Calvin::LOG.info "parse_files: #{files.size} file(s) — PR body: #{description ? 'trovato' : 'assente'}"
+      Success(files: files, usage: usage, description: description)
+    end
+
+    def commit_and_pr(files:, usage:, description:)
+      CommitAndPr.call(
+        files:         files,
+        issue:         @issue,
+        github:        @github,
+        branch_prefix: "auto",
+        usage:         usage,
+        description:   description
+      ).fmap { |r| r.merge(status: :success, usage: usage) }
+       .or { |f| Failure(f.merge(usage: usage)) }
     end
   end
 end

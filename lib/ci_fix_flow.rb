@@ -1,34 +1,29 @@
 # frozen_string_literal: true
-# Flusso di fix CI.
+# Flusso di fix CI (calvin-fix).
+# Pipeline dry-transaction con 5 step espliciti:
 #
-# Riceve l'output dei test falliti, classifica il tipo di errore,
-# e se strutturale chiama Codestral con un prompt mirato.
-# Un solo tentativo. Rimuove sempre la label calvin-fix alla fine.
+#   classify      — classifica l'errore (:structural | :logical | :infra)
+#   build_prompt  — FixPromptBuilder costruisce il prompt
+#   call_mistral  — chiamata Codestral
+#   parse_files   — estrae FILE: blocks
+#   commit_fix    — committa il fix sul branch della PR
+#   post_comment  — posta commento ✅ sulla PR
 #
-# Classificazione errori:
-#   :structural — NameError, LoadError, fixture missing, PG::Undefined*
-#   :logical    — Expected X got Y, assertion failures
-#   :infra      — timeout, crash infrastruttura
+# Nota: remove_fix_label è chiamato in ensure dall'orchestratore (calvin.rb),
+# non dentro questo flow — deve girare anche in caso di Failure.
 #
-# In caso di dubbio → :logical (conservativo: meglio fermarsi che peggiorare).
-#
-# Riuso componenti esistenti:
-#   MistralClient#complete   — chiamata Codestral
-#   FileParser.parse         — estrae FILE: blocks dalla risposta
-#   GitHubClient#get_file_content         — legge file sorgente dal branch
-#   GitHubClient#commit_files_atomically  — committa il fix
-#   GitHubClient#post_pr_comment          — posta commento sulla PR
-#   GitHubClient#remove_label             — rimuove label calvin-fix
-#
-# .run    → :fixed | :unfixable | :error
-# .usage  → Hash | nil  (disponibile dopo .run, per RunReporter)
+# Ritorna:
+#   Success({ status: :fixed, usage: })
+#   Failure({ step:, error:, status: :unfixable | :error, usage: })
 
+require "dry/transaction"
+require_relative "fix_prompt_builder"
 require_relative "file_parser"
 require_relative "mistral_client"
 
 module Calvin
   class CiFixFlow
-    attr_reader :usage
+    include Dry::Transaction
 
     STRUCTURAL_PATTERNS = [
       /NameError.*uninitialized constant/,
@@ -42,8 +37,17 @@ module Calvin
     LOGICAL_PATTERNS = [
       /Expected .+ got/,
       /assert.*failed/i,
+      /ArgumentError/,
+      /StandardError.*fixture/i,
       /\d+ runs,.*\d+ failures/
     ].freeze
+
+    step :classify
+    step :build_prompt
+    step :call_mistral
+    step :parse_files
+    step :commit_fix
+    step :post_comment
 
     def initialize(github, pr_number, pr_branch, test_output)
       @github      = github
@@ -51,133 +55,83 @@ module Calvin
       @pr_branch   = pr_branch
       @test_output = test_output
       @usage       = nil
+      super()
     end
 
-    def run
-      error_type = classify_error(@test_output)
-      Calvin::LOG.info "Tipo errore CI: #{error_type}"
-
-      if error_type == :structural
-        attempt_fix
-      else
-        post_unfixable_comment(error_type)
-        :unfixable
-      end
-    ensure
-      remove_fix_label
-    end
+    attr_reader :usage
 
     private
 
+    def classify(_input)
+      error_type = detect_error_type(@test_output)
+      Calvin::LOG.info "CiFixFlow: tipo errore — #{error_type}"
+
+      if error_type == :structural
+        Success({})
+      else
+        @github.post_pr_comment(@pr_number, <<~MD)
+          ⚠️ **Calvin Fix: errore non fixabile automaticamente.**
+
+          Tipo rilevato: `#{error_type}` — richiede intervento manuale.
+          Leggi lo stacktrace nel commento precedente.
+        MD
+        Failure(step: :classify, error: "errore #{error_type} non fixabile", status: :unfixable, usage: nil)
+      end
+    end
+
+    def build_prompt(_input)
+      prompt = FixPromptBuilder.build(test_output: @test_output, github: @github)
+      Success(prompt: prompt)
+    rescue => e
+      Failure(step: :build_prompt, error: e.message, status: :error, usage: nil)
+    end
+
+    def call_mistral(prompt:)
+      result = MistralClient.new.complete(prompt)
+      @usage = result[:usage]
+      Success(content: result[:content], usage: result[:usage])
+    rescue => e
+      Failure(step: :call_mistral, error: e.message, status: :error, usage: @usage)
+    end
+
+    def parse_files(content:, usage:)
+      files = FileParser.parse(content)
+      if files.empty?
+        Calvin::LOG.warn "CiFixFlow: nessun FILE: block prodotto da Codestral"
+        @github.post_pr_comment(@pr_number, "❌ Calvin Fix: Codestral non ha prodotto file.")
+        return Failure(step: :parse_files, error: "nessun FILE: block", status: :error, usage: usage)
+      end
+      Success(files: files, usage: usage)
+    end
+
+    def commit_fix(files:, usage:)
+      @github.commit_files_atomically(
+        files,
+        message: "fix: CI fix via Calvin — PR ##{@pr_number}",
+        branch:  @pr_branch
+      )
+      Calvin::LOG.info "CiFixFlow: fix committato su #{@pr_branch}"
+      Success(usage: usage)
+    rescue => e
+      Failure(step: :commit_fix, error: e.message, status: :error, usage: usage)
+    end
+
+    def post_comment(usage:)
+      @github.post_pr_comment(@pr_number,
+        "✅ **Calvin Fix applicato.** Push su `#{@pr_branch}` — attendi la CI."
+      )
+      Success(status: :fixed, usage: usage)
+    rescue => e
+      # Non bloccante: il fix è già committato
+      Calvin::LOG.warn "post_comment FAILED (non bloccante): #{e.message}"
+      Success(status: :fixed, usage: usage)
+    end
+
     # In caso di dubbio → :logical (conservativo)
-    def classify_error(output)
+    def detect_error_type(output)
       return :structural if STRUCTURAL_PATTERNS.any? { |p| output.match?(p) }
       return :logical    if LOGICAL_PATTERNS.any? { |p| output.match?(p) }
       :infra
-    end
-
-    # Estrae i blocchi Failure/Error dallo stacktrace Minitest.
-    # Dal primo "N) Failure/Error:" fino alla riga summary "X runs,".
-    def extract_error_blocks(output)
-      blocks   = []
-      current  = []
-      in_block = false
-
-      output.split("\n").each do |line|
-        if line.match?(/^\s*\d+\) (Failure|Error):/)
-          blocks << current.join("\n") if current.any?
-          current  = [line]
-          in_block = true
-        elsif in_block
-          if line.match?(/^\d+ runs,/)
-            blocks << current.join("\n") if current.any?
-            current  = []
-            in_block = false
-          else
-            current << line
-          end
-        end
-      end
-      blocks << current.join("\n") if current.any?
-      blocks.join("\n\n---\n\n")
-    end
-
-    # Estrae path dei file sorgente dallo stacktrace.
-    # Esclude i file di test — il bug è nel sorgente, non nel test.
-    def extract_source_files(output)
-      output
-        .scan(%r{(app/[\w/]+\.rb):\d+})
-        .flatten
-        .uniq
-        .reject { |p| p.include?("test/") }
-    end
-
-    def build_fix_prompt(error_blocks, source_files)
-      file_contents = source_files.filter_map do |path|
-        content = @github.get_file_content(path)
-        next unless content
-        Calvin::LOG.info "injecting source file: #{path}"
-        "---\n#{path}\n#{content}\n---"
-      end.join("\n\n")
-
-      <<~PROMPT
-        La CI ha fallito con questi errori:
-
-        #{error_blocks}
-
-        #{file_contents.empty? ? '' : "Ecco i file sorgente coinvolti:\n\n#{file_contents}"}
-
-        Correggi solo i file che causano l'errore.
-        Rispondi nel formato FILE: solito.
-      PROMPT
-    end
-
-    def attempt_fix
-      error_blocks = extract_error_blocks(@test_output)
-      source_files = extract_source_files(@test_output)
-      Calvin::LOG.info "File sorgente: #{source_files.join(', ')}"
-
-      prompt = build_fix_prompt(error_blocks, source_files)
-      result = MistralClient.new.complete(prompt)
-      @usage = result[:usage]  # esposto per RunReporter
-      files  = FileParser.parse(result[:content])
-
-      if files.empty?
-        Calvin::LOG.warn "Nessun FILE: block prodotto da Codestral"
-        post_pr_comment("\u274C Calvin Fix: Codestral non ha prodotto file.")
-        return :error
-      end
-
-      @github.commit_files_atomically(
-        files,
-        message: "fix: CI fix via Calvin \u2014 PR ##{@pr_number}",
-        branch:  @pr_branch
-      )
-      Calvin::LOG.info "Fix committato su #{@pr_branch}"
-      post_pr_comment("\u2705 **Calvin Fix applicato.** Push su `#{@pr_branch}` \u2014 attendi la CI.")
-      :fixed
-    rescue => e
-      Calvin::LOG.error "attempt_fix error: #{e.message}"
-      post_pr_comment("\u274C Calvin Fix fallito: `#{e.message}`")
-      :error
-    end
-
-    def post_unfixable_comment(error_type)
-      post_pr_comment(<<~MD)
-        \u26A0\uFE0F **Calvin Fix: errore non fixabile automaticamente.**
-
-        Tipo rilevato: `#{error_type}` \u2014 richiede intervento manuale.\n        Leggi lo stacktrace nel commento precedente.
-      MD
-    end
-
-    def post_pr_comment(body)
-      @github.post_pr_comment(@pr_number, body)
-    end
-
-    def remove_fix_label
-      @github.remove_label(@pr_number, "calvin-fix")
-    rescue => e
-      Calvin::LOG.warn "remove_fix_label: #{e.message}"
     end
   end
 end
