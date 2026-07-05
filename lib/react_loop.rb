@@ -32,8 +32,8 @@ module Calvin
     GRACE_TURNS     = 2
     NOT_FOUND_LIMIT = 3
 
-    CALVIN_PROMPT_PATH    = ".calvin/prompt"
-    FALLBACK_CONVENTIONS  = "You are a senior Rails developer. Follow the project conventions you have read during exploration."
+    CALVIN_PROMPT_PATH   = ".calvin/prompt"
+    FALLBACK_CONVENTIONS = "You are a senior Rails developer. Follow the project conventions you have read during exploration."
 
     # System message fase 1: solo regole esplorazione e tool grammar.
     # Niente Ruby, niente formato output — il modello è in "explorer mode".
@@ -126,49 +126,11 @@ module Calvin
 
     # Ritorna { content: String, turns: Integer, usage: Hash | nil }
     def run
-      turns = 0
-
-      MAX_TURNS.times do
-        turns += 1
-        raw = @mistral.complete_messages(@messages)[:content]
-        Calvin::LOG.info "ReAct turn #{turns}: #{raw[0..120]}"
-
-        action = parse_action(raw)
-
-        if action.nil?
-          @json_failures += 1
-          Calvin::LOG.warn "JSON parse failed (#{@json_failures}/#{GRACE_TURNS})"
-          break if @json_failures >= GRACE_TURNS
-          next
-        end
-
-        @json_failures = 0
-        tool = action["tool"]
-        args = action["args"] || {}
-
-        if tool == "done"
-          Calvin::LOG.info "ReAct explore done after #{turns} turn(s)"
-          return implement_phase(turns)
-        end
-
-        observation = dispatch_tool(tool, args)
-        Calvin::LOG.info "observation (#{tool}): #{observation[0..80]}"
-
-        # Registra l'observation con il path per il collasso nella fase implement
-        record_observation(tool, args, observation)
-
-        if observation.start_with?("ERROR: file non trovato") || observation.start_with?("ERROR: file not found")
-          @not_found_streak += 1
-          if @not_found_streak >= NOT_FOUND_LIMIT
-            Calvin::LOG.warn "#{NOT_FOUND_LIMIT} consecutive NOT_FOUND — forcing implement"
-            return implement_phase(turns)
-          end
-        else
-          @not_found_streak = 0
-        end
-
-        @messages << { role: "assistant", content: raw }
-        @messages << { role: "user",      content: "Observation: #{observation}" }
+      MAX_TURNS.times do |i|
+        n = i + 1
+        result = process_turn(n)
+        return implement_phase(n) if result == :done
+        break                     if result == :abort
       end
 
       Calvin::LOG.warn "ReAct MAX_TURNS (#{MAX_TURNS}) reached — forcing implement"
@@ -177,14 +139,77 @@ module Calvin
 
     private
 
-    # Fase 2: chiamata separata con system = .calvin/prompt + RESPONSE_FORMAT
+    # Esegue un singolo turn di esplorazione.
+    # Ritorna:
+    #   :done  — il modello ha chiamato done(), avvia implement_phase
+    #   :abort — troppi JSON parse failure, interrompi il loop
+    #   :continue — appendi observation e prosegui
+    def process_turn(n)
+      raw    = call_model
+      action = parse_action(raw)
+
+      if action.nil?
+        return handle_json_failure(n)
+      end
+
+      @json_failures = 0
+      tool = action["tool"]
+      args = action["args"] || {}
+
+      return :done if tool == "done".tap {
+        Calvin::LOG.info "ReAct explore done after #{n} turn(s)"
+      }
+
+      observation = dispatch_tool(tool, args)
+      Calvin::LOG.info "observation (#{tool}): #{observation[0..80]}"
+
+      record_observation(tool, args, observation)
+      append_turn(raw, observation)
+
+      handle_not_found(observation, n)
+    end
+
+    def call_model
+      raw = @mistral.complete_messages(@messages)[:content]
+      Calvin::LOG.info "ReAct turn: #{raw[0..120]}"
+      raw
+    end
+
+    def handle_json_failure(n)
+      @json_failures += 1
+      Calvin::LOG.warn "JSON parse failed (#{@json_failures}/#{GRACE_TURNS}) at turn #{n}"
+      @json_failures >= GRACE_TURNS ? :abort : :continue
+    end
+
+    # Ritorna :done se raggiunti NOT_FOUND_LIMIT consecutivi, altrimenti :continue.
+    def handle_not_found(observation, n)
+      if observation.start_with?("ERROR:")
+        @not_found_streak += 1
+        if @not_found_streak >= NOT_FOUND_LIMIT
+          Calvin::LOG.warn "#{NOT_FOUND_LIMIT} consecutive NOT_FOUND at turn #{n} — forcing implement"
+          return :done
+        end
+      else
+        @not_found_streak = 0
+      end
+      :continue
+    end
+
+    def append_turn(raw, observation)
+      @messages << { role: "assistant", content: raw }
+      @messages << { role: "user",      content: "Observation: #{observation}" }
+    end
+
+    # ---------------------------------------------------------------------------
+    # Fase 2 — implement
+    # ---------------------------------------------------------------------------
+
     def implement_phase(turns)
       Calvin::LOG.info "implement_phase after #{turns} explore turn(s)"
 
-      conventions = load_conventions
+      conventions      = load_conventions
       implement_system = "#{conventions}\n\n#{RESPONSE_FORMAT}"
-
-      implement_user = build_implement_user
+      implement_user   = build_implement_user
 
       response = @mistral.complete_messages([
         { role: "system", content: implement_system },
@@ -194,36 +219,26 @@ module Calvin
       { content: response[:content], turns: turns, usage: response[:usage] }
     end
 
-    # Carica .calvin/prompt dal repo target.
-    # Fallback a FALLBACK_CONVENTIONS se il file non esiste.
     def load_conventions
       content = @github.get_file_content(CALVIN_PROMPT_PATH)
       if content
-        Calvin::LOG.info "implement_phase: loaded #{CALVIN_PROMPT_PATH} (#{content.bytesize} bytes)"
+        Calvin::LOG.info "load_conventions: loaded #{CALVIN_PROMPT_PATH} (#{content.bytesize} bytes)"
         content
       else
-        Calvin::LOG.warn "implement_phase: #{CALVIN_PROMPT_PATH} not found — using fallback conventions"
+        Calvin::LOG.warn "load_conventions: #{CALVIN_PROMPT_PATH} not found — using fallback"
         FALLBACK_CONVENTIONS
       end
     end
 
-    # Costruisce il user message per la fase implement:
-    # task originale + observations collassate (solo contenuti, no JSON thoughts).
     def build_implement_user
       context_block = if @observations.any?
-        lines = @observations.map do |obs|
-          "#{obs[:label]}:\n#{obs[:content]}"
-        end.join("\n\n---\n\n")
+        lines = @observations.map { |o| "#{o[:label]}:\n#{o[:content]}" }.join("\n\n---\n\n")
         "## Context gathered during exploration\n\n#{lines}"
-      else
-        ""
       end
 
-      ["## Task", @issue_prompt, context_block].reject(&:empty?).join("\n\n")
+      ["## Task", @issue_prompt, context_block].compact.reject(&:empty?).join("\n\n")
     end
 
-    # Registra un'observation utile per il collasso nella fase implement.
-    # Ignora errori NOT_FOUND — non hanno valore di contesto.
     def record_observation(tool, args, observation)
       return if observation.start_with?("ERROR:")
 
@@ -235,6 +250,10 @@ module Calvin
 
       @observations << { label: label, content: observation }
     end
+
+    # ---------------------------------------------------------------------------
+    # Tool dispatch
+    # ---------------------------------------------------------------------------
 
     TOOLS = {
       "read_file" => ->(github, args) {
