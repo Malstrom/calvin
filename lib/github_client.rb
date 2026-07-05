@@ -91,18 +91,25 @@ module Calvin
       new_commit.sha
     end
 
-    # Crea un branch dal default branch
+    # Crea un branch dal default branch del repo.
     def create_branch(branch_name)
-      default_branch = @client.repository(REPO).default_branch
       sha = @client.branch(REPO, default_branch).commit.sha
       @client.create_ref(REPO, "refs/heads/#{branch_name}", sha)
     rescue Octokit::UnprocessableEntity
       # branch already exists
     end
 
-    # Apre una PR
-    def create_pull_request(title:, body:, head:, base: "main")
-      @client.create_pull_request(REPO, base, head, title, body)
+    # Apre una PR verso il default branch del repo.
+    # labels: array di stringhe opzionale — vengono aggiunte alla PR subito dopo la creazione.
+    def create_pull_request(title:, body:, head:, labels: [])
+      pr = @client.create_pull_request(REPO, default_branch, head, title, body)
+      @client.add_labels_to_an_issue(REPO, pr.number, labels) if labels.any?
+      pr
+    end
+
+    # Branch di default del repo — memoizzato, una sola API call.
+    def default_branch
+      @default_branch ||= @client.repository(REPO).default_branch
     end
 
     private

@@ -2,6 +2,14 @@
 # Caricata una sola volta in boot.rb come Calvin::CONFIG.
 # Aggiungere nuovi modelli o parametri qui — nessun cambio al codice Ruby necessario.
 
+# Radici dei repo per stack — determina dove Calvin legge/scrive i file
+repo_roots:
+  rails:   backend/api
+  flutter: frontend/mobile
+
+# Branch prefix per le PR aperte da Calvin
+branch_prefix: auto
+
 react:
   max_turns: 30
   grace_turns: 2
@@ -9,10 +17,18 @@ react:
 
 sampling:
   temperature:
-    explore: 0.1   # ReAct loop — leggera variabilità per tool selection
-    implement: 0.0 # Codegen puro — massima riproducibilità
-    fix: 0.0       # CiFixFlow — deterministico
+    explore:   0.1  # ReAct loop — leggera variabilità per tool selection
+    implement: 0.0  # Codegen puro — massima riproducibilità
+    fix:       0.0  # CiFixFlow — deterministico
+    test_fix:  0.0  # TestFixLoop — deterministico
   max_tokens: 8192
+
+mistral:
+  open_timeout: 15   # secondi — connessione
+  read_timeout: 180  # secondi — risposta
+
+test_fix:
+  max_attempts: 2
 
 pricing:
   models:

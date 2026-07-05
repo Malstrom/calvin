@@ -8,6 +8,7 @@
 #
 # temperature e max_tokens vengono letti da Calvin::CONFIG[:sampling].
 # Passare temperature: esplicitamente sovrascrive il default.
+# open_timeout e read_timeout letti da Calvin::CONFIG[:mistral].
 
 require "net/http"
 require "json"
@@ -17,13 +18,13 @@ module Calvin
     API_URL       = URI("https://api.mistral.ai/v1/chat/completions")
     DEFAULT_MODEL = ENV.fetch("CALVIN_MODEL", "codestral-latest")
 
-    OPEN_TIMEOUT = 15
-    READ_TIMEOUT = 180
-
     def initialize(api_key: ENV.fetch("MISTRAL_API_KEY"))
-      @api_key    = api_key
-      @sampling   = Calvin::CONFIG.dig(:sampling) || {}
-      @max_tokens = @sampling[:max_tokens] || 8192
+      @api_key      = api_key
+      @sampling     = Calvin::CONFIG.dig(:sampling) || {}
+      @max_tokens   = @sampling[:max_tokens] || 8192
+      mistral_cfg   = Calvin::CONFIG.dig(:mistral) || {}
+      @open_timeout = (mistral_cfg[:open_timeout] || 15).to_i
+      @read_timeout = (mistral_cfg[:read_timeout] || 180).to_i
     end
 
     # Singola chiamata — prompt testuale, usato da ImplementFlow e CiFixFlow
@@ -48,8 +49,8 @@ module Calvin
     def call(messages, model:, temperature:)
       http              = Net::HTTP.new(API_URL.host, API_URL.port)
       http.use_ssl      = true
-      http.open_timeout = OPEN_TIMEOUT
-      http.read_timeout = READ_TIMEOUT
+      http.open_timeout = @open_timeout
+      http.read_timeout = @read_timeout
 
       req                  = Net::HTTP::Post.new(API_URL)
       req["Content-Type"]  = "application/json"

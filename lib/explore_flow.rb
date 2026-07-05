@@ -1,11 +1,14 @@
 # frozen_string_literal: true
 # Flusso Calvin — triggerato dalla label 'calvin'.
-# Pipeline dry-transaction con 4 step espliciti:
+# Pipeline dry-transaction con step espliciti:
 #
-#   build_prompt   — ContextBuilder costruisce il prompt dal title+body dell'issue
-#   react_loop     — ReActLoop: il modello esplora e implementa
-#   parse_files    — estrae FILE: blocks e PR_BODY
-#   commit_and_pr  — branch + commit + PR
+#   build_prompt      — ContextBuilder costruisce il prompt dal title+body dell'issue
+#   react_loop        — ReActLoop: il modello esplora e implementa
+#   parse_files       — estrae FILE: blocks e PR_BODY
+#   commit_files      — branch + commit (senza aprire la PR)
+#   rubocop           — autocorrect sul branch appena creato
+#   [test_fix_loop]   — placeholder: verrà aggiunto in Step 5
+#   open_pr           — apre la PR (con eventuali label se i test non passano)
 #
 # Stack ("rails" | "flutter") determinato dalle label dell'issue.
 # Default: "rails".
@@ -30,7 +33,8 @@ module Calvin
     step :build_prompt
     step :react_loop
     step :parse_files
-    step :commit_and_pr
+    step :commit_files
+    step :open_pr
 
     def self.run(github, issue)
       new.call(github: github, issue: issue)
@@ -71,15 +75,26 @@ module Calvin
       Success(github: github, issue: issue, files: files, usage: usage, description: description, explore_turns: explore_turns)
     end
 
-    def commit_and_pr(github:, issue:, files:, usage:, description:, explore_turns:)
-      CommitAndPr.call(
-        files:         files,
-        issue:         issue,
-        github:        github,
-        branch_prefix: "auto",
-        usage:         usage,
-        description:   description
-      ).fmap { |r| r.merge(status: :success, usage: usage, explore_turns: explore_turns) }
+    def commit_files(github:, issue:, files:, usage:, description:, explore_turns:)
+      CommitAndPr.commit_files(files, issue: issue, github: github).fmap do |r|
+        { github: github, issue: issue, branch: r[:branch], files: r[:files],
+          usage: usage, description: description, explore_turns: explore_turns,
+          labels: [] }
+      end.or { |f| Failure(f.merge(usage: usage, explore_turns: explore_turns)) }
+    end
+
+    # Step 5 aggiungerà qui il test fix loop tra commit_files e open_pr.
+    # Per ora labels rimane [] e il flusso è identico al precedente.
+
+    def open_pr(github:, issue:, branch:, files:, usage:, description:, explore_turns:, labels:)
+      CommitAndPr.open_pr(
+        branch,
+        issue:       issue,
+        github:      github,
+        usage:       usage,
+        description: description,
+        labels:      labels
+      ).fmap { |r| r.merge(status: :success, branch: branch, files: files, usage: usage, explore_turns: explore_turns) }
        .or   { |f| Failure(f.merge(usage: usage, explore_turns: explore_turns)) }
     end
 
