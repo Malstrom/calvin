@@ -7,7 +7,7 @@
 
 require_relative "../lib/boot"
 
-# ── Post-steps uniformi per tutti i flow ─────────────────────────────────────────────
+# ── Post-steps uniformi per tutti i flow ──────────────────────────────────────────────────────────────────────────
 def run_post_steps(result, github:, workflow:, ref:, extra: {})
   if result.success?
     r = result.value!
@@ -54,7 +54,7 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
   end
 end
 
-# ── Fetch issue ───────────────────────────────────────────────────────────────────────────────
+# ── Fetch issue ────────────────────────────────────────────────────────────────────────────────────────────
 temp_github = Calvin::GitHubClient.new
 issue       = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
 labels      = issue.labels.map(&:name)
@@ -63,14 +63,15 @@ repo_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last 
 Calvin::LOG.info "labels: #{labels.join(', ')}"
 Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
 
-github = Calvin::GitHubClient.new(repo_root: repo_root)
+github  = Calvin::GitHubClient.new(repo_root: repo_root)
+mistral = Calvin::MistralClient.new
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
 
-# ── Calvin mode (ExploreFlow) ──────────────────────────────────────────────────────────────────
+# ── Calvin mode (ExploreFlow) ────────────────────────────────────────────────────────────────────────────────────────────
 if labels.include?("calvin")
   Calvin::LOG.info "mode: calvin (ExploreFlow)"
 
-  result = Calvin::ExploreFlow.run(github, issue)
+  result = Calvin::ExploreFlow.run(github, issue, mistral: mistral)
   run_post_steps(result,
     github:   github,
     workflow: "calvin",
@@ -80,6 +81,6 @@ if labels.include?("calvin")
   exit(result.success? ? 0 : 1)
 end
 
-# ── Nessuna label riconosciuta ─────────────────────────────────────────────────────────────────────
+# ── Nessuna label riconosciuta ───────────────────────────────────────────────────────────────────────────────────────────────────────
 Calvin::LOG.error "Nessuna label Calvin riconosciuta su issue ##{issue.number} (labels: #{labels.join(', ')}). Usa la label 'calvin'."
 exit(1)
