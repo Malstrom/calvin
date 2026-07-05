@@ -21,12 +21,37 @@ CORRECT: `enum :field, { cool: 0, warm: 1 }`  ← enum only, nothing else
 WRONG:   `validates :field, numericality: { in: 1..5 }`  ← forbidden if a contract rule covers it
 The contract is the single validation source for API inputs.
 
-**4. Controller — never render json: directly**
+**4. Contract — inline predicates, no rules, no constants**
+Enum fields and integer ranges are validated inline in the `params` block.
+Never define VALID_* constants. Never write `rule` blocks for field validation.
+
+CORRECT:
+```ruby
+params do
+  required(:preferences).hash do
+    optional(:temperature_preference).maybe(:string, included_in?: PreferenceProfile.temperature_preferences.keys)
+    optional(:rhythm_importance).maybe(:integer, included_in?: 1..5)
+  end
+end
+```
+WRONG:
+```ruby
+VALID_TEMPERATURE_PREFERENCES = %w[cool warm no_preference].freeze
+
+rule(preferences: :temperature_preference) do
+  key.failure('...') unless VALID_TEMPERATURE_PREFERENCES.include?(value)
+end
+```
+- Enum fields: use `included_in?: Model.enum_field.keys` — single source of truth from the model.
+- Integer ranges: use `included_in?: 1..5` inline.
+- Result: zero `rule` blocks for field validation.
+
+**5. Controller — never render json: directly**
 CORRECT: `render_success({ preferences: PreferencesSerializer.new(p).serializable_hash })`
 WRONG:   `render json: { preferences: ... }`
 Always use ApiResponse helpers: `render_success`, `render_created`, `render_error`, `render_contract_errors`.
 
-**5. Controller — pattern matching on service result**
+**6. Controller — pattern matching on service result**
 CORRECT:
 ```ruby
 case SavePreferencesService.call(...)
@@ -35,10 +60,6 @@ in Failure[:validation_failed, message] then render_error(code: 'validation_fail
 end
 ```
 WRONG: `if result.success? ...`
-
-**6. Contract — one rule per field**
-CORRECT: `rule(preferences: :temperature_preference) { next unless value; key.failure("...") unless VALID.include?(value) }`
-WRONG:   a single `rule(:preferences)` block with multiple `if` statements inside.
 
 **7. Tests — monad include**
 Every test class using `assert_pattern { result => Success }` MUST include at the top of the class:

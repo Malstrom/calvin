@@ -40,11 +40,15 @@ Critical patterns that MUST be applied:
 1. naming — contracts and services use descriptive names matching the action.
    CORRECT: SavePreferencesContract, UpdateProfileService
 
-2. contracts.canonical_pattern — one rule per field using rule(resource: :field) syntax.
-   NEVER write a single rule(:resource) block with multiple if-statements inside.
-   Enum validations use a CONSTANT array, not inline strings.
-   CORRECT: rule(preferences: :temperature_preference) { ... }
-   WRONG:   rule(:preferences) { if ...; if ...; if ... }
+2. contracts.canonical_pattern — inline predicates in params block, no rule blocks, no constants.
+   Enum fields: `included_in?: Model.enum_field.keys` — single source of truth from the model.
+   Integer ranges: `included_in?: 1..5` inline.
+   CORRECT:
+     optional(:temperature_preference).maybe(:string, included_in?: PreferenceProfile.temperature_preferences.keys)
+     optional(:rhythm_importance).maybe(:integer, included_in?: 1..5)
+   WRONG:
+     VALID_TEMPERATURE_PREFERENCES = %w[cool warm no_preference].freeze
+     rule(preferences: :temperature_preference) { key.failure('...') unless VALID_TEMPERATURE_PREFERENCES.include?(value) }
 
 3. controllers.canonical_pattern — ALWAYS use ApiResponse concern helpers.
    render_contract_errors(result), render_success(...), render_created(...), render_error(...)
