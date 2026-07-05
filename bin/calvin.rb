@@ -2,45 +2,18 @@
 # Orchestratore Calvin — entry point per GitHub Actions.
 #
 # Routing:
-#   CALVIN_FIX_MODE=true    → CiFixFlow   (label calvin-fix su PR)
-#   CALVIN_AUTO_MODE=true   → ExploreFlow  (label calvin-auto su issue)
-#   default                 → ImplementFlow (label calvin-direct)
+#   CALVIN_FIX_MODE=true  → CiFixFlow   (trigger da workflow ci-fix)
+#   label calvin-auto     → ExploreFlow
+#   default               → ImplementFlow
 
-require "dry/monads"
-require "octokit"
-require "base64"
-require "logger"
-require_relative "../lib/github_client"
-require_relative "../lib/context_builder"
-require_relative "../lib/mistral_client"
-require_relative "../lib/file_parser"
-require_relative "../lib/commit_and_pr"
-require_relative "../lib/implement_flow"
-require_relative "../lib/explore_flow"
-require_relative "../lib/ci_fix_flow"
-require_relative "../lib/run_reporter"
-require_relative "../lib/rubocop_autocorrect"
-require_relative "../lib/test_output_parser"
-
-module Calvin
-  REPO  = ENV.fetch("GITHUB_REPOSITORY")
-  MODEL = ENV.fetch("CALVIN_MODEL", "codestral-latest")
-  LOG   = Logger.new($stdout).tap do |l|
-    l.formatter = proc { |sev, _, _, msg| "[calvin] #{sev}: #{msg}\n" }
-  end
-
-  REPO_ROOTS = {
-    "rails"   => "backend/api",
-    "flutter" => "frontend/mobile"
-  }.freeze
-end
+require_relative "../lib/boot"
 
 # ── Post-steps uniformi per tutti i flow ──────────────────────────────────────
 def run_post_steps(result, github:, workflow:, ref:, extra: {})
   if result.success?
     r = result.value!
     Calvin::RubocopAutocorrect.run(
-      files:  r[:files] || [],
+      files:  r[:files]  || [],
       branch: r[:branch] || "",
       github: github
     )
@@ -57,7 +30,8 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
     err = result.failure
     Calvin::LOG.error "FAILURE step=#{err[:step]} — #{err[:error]}"
     begin
-      github.post_status(extra[:issue] || ref,
+      github.post_status(
+        extra[:issue] || ref,
         "\u{1F534} Calvin error (#{err[:step]})\n\n```\n#{err[:error]}\n```"
       ) if extra[:issue]
     rescue => e
@@ -75,7 +49,7 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
   end
 end
 
-# ── Fix mode (label calvin-fix su PR) ─────────────────────────────────────────
+# ── Fix mode (trigger da workflow ci-fix) ─────────────────────────────────────
 if ENV["CALVIN_FIX_MODE"] == "true"
   pr_number   = ENV.fetch("PR_NUMBER").to_i
   pr_branch   = ENV.fetch("PR_BRANCH")
@@ -94,11 +68,10 @@ if ENV["CALVIN_FIX_MODE"] == "true"
     extra:    { test_pass_pct: Calvin::TestOutputParser.pass_pct(test_output) }
   )
 
-  github.remove_label_if_present(pr_number, "calvin-fix") rescue nil
   exit(result.success? ? 0 : 1)
 end
 
-# ── Fetch issue (normal + auto mode) ──────────────────────────────────────────
+# ── Fetch issue (auto + direct mode) ──────────────────────────────────────────
 temp_github = Calvin::GitHubClient.new
 issue       = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
 labels      = issue.labels.map(&:name)
@@ -110,8 +83,8 @@ github = Calvin::GitHubClient.new(repo_root: repo_root)
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
 
 # ── Auto mode (label calvin-auto) ─────────────────────────────────────────────
-if ENV["CALVIN_AUTO_MODE"] == "true" || labels.include?("calvin-auto")
-  Calvin::LOG.info "mode: auto (ReAct)"
+if labels.include?("calvin-auto")
+  Calvin::LOG.info "mode: auto (ExploreFlow)"
 
   result = Calvin::ExploreFlow.new(github, issue).run
   run_post_steps(result,
