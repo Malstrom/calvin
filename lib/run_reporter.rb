@@ -64,7 +64,6 @@ module Calvin
         test_pass_pct.nil? ? nil : test_pass_pct.to_s
       ]
 
-      # Legge CSV esistente tramite il client del caller (repo_root già incluso)
       existing_csv = github.get_file_content(CSV_PATH)
       rows = if existing_csv
         CSV.parse(existing_csv, headers: true).map(&:fields)
@@ -89,9 +88,9 @@ module Calvin
         branch:  "main"
       )
 
-      Calvin::LOG.info "RunReporter: report aggiornato (#{CSV_PATH})"
+      Calvin::LOG.info "RunReporter: report aggiornato (#{CSV_PATH}) — #{rows.size} righe totali"
     rescue => e
-      Calvin::LOG.warn "RunReporter: #{e.message}"
+      Calvin::LOG.warn "RunReporter FAILED: #{e.class} — #{e.message}\n#{e.backtrace.first(3).join("\n")}"
     end
 
     # ── private ────────────────────────────────────────────────────────────────
@@ -115,8 +114,7 @@ module Calvin
 
     def self.build_md(rows)
       header = "| Date | Workflow | Ref | Model | Prompt tok | Completion tok | Total tok | Cost USD | Status | Test pass % |"
-      sep    = "|------|----------|-----|-------|-----------|----------------|-----------|----------|--------|-------------|]"
-      sep    = sep.delete("]")
+      sep    = "|------|----------|-----|-------|-----------|----------------|-----------|----------|--------|-------------|"
 
       table_rows = rows.map do |r|
         run_at, workflow, ref, model, pt, ct, tt, cost, status, pct = r
