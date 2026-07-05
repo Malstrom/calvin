@@ -7,6 +7,9 @@
 #   parse_files    — estrae FILE: blocks e PR_BODY
 #   commit_and_pr  — branch + commit + PR
 #
+# Stack ("rails" | "flutter") determinato dalle label dell'issue.
+# Default: "rails".
+#
 # Ritorna:
 #   Success({ status: :success, pr_url:, branch:, files:, usage: })
 #   Failure({ step:, error:, usage: })
@@ -20,6 +23,9 @@ require_relative "commit_and_pr"
 module Calvin
   class ExploreFlow
     include Dry::Transaction
+
+    KNOWN_STACKS = %w[rails flutter].freeze
+    DEFAULT_STACK = "rails"
 
     step :build_prompt
     step :react_loop
@@ -40,8 +46,9 @@ module Calvin
     end
 
     def react_loop(github:, issue:, prompt:)
-      Calvin::LOG.info "ExploreFlow: avvio ReActLoop per issue ##{issue.number}"
-      result = ReActLoop.new(github, prompt).run
+      stack = detect_stack(issue)
+      Calvin::LOG.info "ExploreFlow: avvio ReActLoop per issue ##{issue.number} (stack=#{stack})"
+      result = ReActLoop.new(github, prompt, stack: stack).run
       Calvin::LOG.info "ReActLoop terminato in #{result[:turns]} turn(s)"
       Success(github: github, issue: issue, content: result[:content], usage: result[:usage])
     rescue => e
@@ -66,6 +73,13 @@ module Calvin
         description:   description
       ).fmap { |r| r.merge(status: :success, usage: usage) }
        .or { |f| Failure(f.merge(usage: usage)) }
+    end
+
+    # Legge le label dell'issue e ritorna il primo stack riconosciuto.
+    # Fallback: DEFAULT_STACK.
+    def detect_stack(issue)
+      labels = Array(issue.labels).map { |l| l.is_a?(String) ? l : l[:name].to_s.downcase }
+      KNOWN_STACKS.find { |s| labels.include?(s) } || DEFAULT_STACK
     end
   end
 end
