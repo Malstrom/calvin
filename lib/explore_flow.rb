@@ -9,6 +9,7 @@
 # Il modello guida da solo l'esplorazione.
 #
 # .run → Success(pr_url) | Failure(msg)
+# .last_usage → Hash | nil  (disponibile dopo .run, per RunReporter)
 
 require "dry/monads"
 require_relative "file_parser"
@@ -20,9 +21,12 @@ module Calvin
     include Dry::Monads[:result]
     include CommitAndPr
 
+    attr_reader :last_usage
+
     def initialize(github, issue)
-      @github = github
-      @issue  = issue
+      @github     = github
+      @issue      = issue
+      @last_usage = nil
     end
 
     def run
@@ -38,11 +42,11 @@ module Calvin
       return Failure("ExploreFlow: nessun FILE: block prodotto dal modello") if files.empty?
 
       description = FileParser.parse_pr_body(result[:content])
-      usage       = result[:usage]
+      @last_usage = result[:usage]
       Calvin::LOG.info(description ? "PR body estratto (#{description.bytesize} bytes)" : "PR body non trovato nella risposta")
 
       pr_url = commit_and_open_pr(files, issue: @issue, branch_prefix: "auto",
-                                         usage: usage, description: description)
+                                         usage: @last_usage, description: description)
       Calvin::LOG.info "##{@issue.number} done — PR: #{pr_url}"
       Success(pr_url)
     rescue StandardError => e

@@ -20,13 +20,16 @@
 #   GitHubClient#post_pr_comment          — posta commento sulla PR
 #   GitHubClient#remove_label             — rimuove label calvin-fix
 #
-# .run → :fixed | :unfixable | :error
+# .run    → :fixed | :unfixable | :error
+# .usage  → Hash | nil  (disponibile dopo .run, per RunReporter)
 
 require_relative "file_parser"
 require_relative "mistral_client"
 
 module Calvin
   class CiFixFlow
+    attr_reader :usage
+
     STRUCTURAL_PATTERNS = [
       /NameError.*uninitialized constant/,
       /LoadError.*cannot load such file/,
@@ -47,6 +50,7 @@ module Calvin
       @pr_number   = pr_number
       @pr_branch   = pr_branch
       @test_output = test_output
+      @usage       = nil
     end
 
     def run
@@ -135,6 +139,7 @@ module Calvin
 
       prompt = build_fix_prompt(error_blocks, source_files)
       result = MistralClient.new.complete(prompt)
+      @usage = result[:usage]  # esposto per RunReporter
       files  = FileParser.parse(result[:content])
 
       if files.empty?

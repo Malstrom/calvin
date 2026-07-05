@@ -18,6 +18,7 @@ require_relative "../lib/commit_and_pr"
 require_relative "../lib/implement_flow"
 require_relative "../lib/explore_flow"
 require_relative "../lib/ci_fix_flow"
+require_relative "../lib/run_reporter"
 
 module Calvin
   REPO = ENV.fetch("GITHUB_REPOSITORY")
@@ -31,17 +32,39 @@ module Calvin
   }.freeze
 end
 
+# ── Helper: estrae % test passati dall'output Minitest ────────────────────────
+def extract_test_pct(output)
+  return nil if output.nil? || output.empty?
+  m = output.match(/(\d+) runs, (\d+) failures/)
+  return nil unless m
+  runs, failures = m[1].to_i, m[2].to_i
+  return nil if runs.zero?
+  ((runs - failures) / runs.to_f * 100).round(1)
+end
+
 # ── Fix mode (label calvin-fix su PR) ───────────────────────────────────────
 if ENV["CALVIN_FIX_MODE"] == "true"
   pr_number   = ENV.fetch("PR_NUMBER").to_i
   pr_branch   = ENV.fetch("PR_BRANCH")
   test_output = File.read(ENV.fetch("TEST_OUTPUT_PATH", "/tmp/test-output.txt"))
 
-  github = Calvin::GitHubClient.new(repo_root: "backend/api")
+  github   = Calvin::GitHubClient.new(repo_root: "backend/api")
+  fix_flow = Calvin::CiFixFlow.new(github, pr_number, pr_branch, test_output)
   Calvin::LOG.info "fix mode — PR ##{pr_number} branch: #{pr_branch}"
 
-  result = Calvin::CiFixFlow.new(github, pr_number, pr_branch, test_output).run
+  result = fix_flow.run
   Calvin::LOG.info "CiFixFlow result: #{result}"
+
+  Calvin::RunReporter.write(
+    github:        github,
+    workflow:      "calvin-fix",
+    ref:           pr_number,
+    model:         ENV.fetch("CALVIN_MODEL", "codestral-latest"),
+    usage:         fix_flow.usage,
+    status:        result,
+    test_pass_pct: extract_test_pct(test_output)
+  )
+
   exit(result == :error ? 1 : 0)
 end
 
@@ -60,7 +83,8 @@ Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
 if ENV["CALVIN_AUTO_MODE"] == "true" || labels.include?("calvin-auto")
   Calvin::LOG.info "mode: auto (ReAct)"
 
-  result = Calvin::ExploreFlow.new(github, issue).run
+  explore_flow = Calvin::ExploreFlow.new(github, issue)
+  result       = explore_flow.run
 
   result.failure do |err|
     Calvin::LOG.error "FAILURE: #{err}"
@@ -69,8 +93,27 @@ if ENV["CALVIN_AUTO_MODE"] == "true" || labels.include?("calvin-auto")
     rescue => e
       Calvin::LOG.error "post_status fallito: #{e.message}"
     end
+
+    Calvin::RunReporter.write(
+      github:   github,
+      workflow: "calvin-auto",
+      ref:      issue.number,
+      model:    ENV.fetch("CALVIN_MODEL", "codestral-latest"),
+      usage:    explore_flow.last_usage,
+      status:   :failure
+    )
+
     exit 1
   end
+
+  Calvin::RunReporter.write(
+    github:   github,
+    workflow: "calvin-auto",
+    ref:      issue.number,
+    model:    ENV.fetch("CALVIN_MODEL", "codestral-latest"),
+    usage:    explore_flow.last_usage,
+    status:   :success
+  )
 
   exit 0
 end
@@ -86,7 +129,8 @@ rescue => e
   exit 1
 end
 
-result = Calvin::ImplementFlow.new(github, issue, prompt).run
+implement_flow = Calvin::ImplementFlow.new(github, issue, prompt)
+result         = implement_flow.run
 
 result.failure do |err|
   Calvin::LOG.error "FAILURE: #{err}"
@@ -95,5 +139,24 @@ result.failure do |err|
   rescue => e
     Calvin::LOG.error "post_status fallito: #{e.message}"
   end
+
+  Calvin::RunReporter.write(
+    github:   github,
+    workflow: "calvin-direct",
+    ref:      issue.number,
+    model:    ENV.fetch("CALVIN_MODEL", "codestral-latest"),
+    usage:    implement_flow.last_usage,
+    status:   :failure
+  )
+
   exit 1
 end
+
+Calvin::RunReporter.write(
+  github:   github,
+  workflow: "calvin-direct",
+  ref:      issue.number,
+  model:    ENV.fetch("CALVIN_MODEL", "codestral-latest"),
+  usage:    implement_flow.last_usage,
+  status:   :success
+)

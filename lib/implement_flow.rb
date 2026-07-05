@@ -14,7 +14,8 @@
 #   7. Parsea i FILE: blocks e il PR_BODY block dalla risposta
 #   8. Commit atomico + apre PR con description e token report nel body (via CommitAndPr)
 #
-# .run → Success(pr_url) | Failure(msg)
+# .run        → Success(pr_url) | Failure(msg)
+# .last_usage → Hash | nil  (disponibile dopo .run, per RunReporter)
 
 require "dry/monads"
 require_relative "file_parser"
@@ -25,6 +26,8 @@ module Calvin
     include Dry::Monads[:result]
     include CommitAndPr
 
+    attr_reader :last_usage
+
     FILE_LIST_PATTERN    = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
     MODEL_PATH_PATTERN   = %r{app/models/([\w/]+)\.rb}
     PROJECT_PROMPT_PATH  = ".calvin/prompt"
@@ -32,18 +35,19 @@ module Calvin
     CONTROLLER_TEST_EXAMPLE = "test/controllers/api/v1/me_controller_test.rb"
 
     def initialize(github, issue, prompt)
-      @github = github
-      @issue  = issue
-      @prompt = prompt
+      @github     = github
+      @issue      = issue
+      @prompt     = prompt
+      @last_usage = nil
     end
 
     def run
-      enriched = inject_existing_files(@prompt)
-      result   = MistralClient.new.complete(enriched)
-      content  = result[:content]
-      usage    = result[:usage]
+      enriched   = inject_existing_files(@prompt)
+      result     = MistralClient.new.complete(enriched)
+      content    = result[:content]
+      @last_usage = result[:usage]
 
-      post_comment(content, usage)
+      post_comment(content, @last_usage)
 
       files = FileParser.parse(content)
       Calvin::LOG.info "parsed #{files.size} file(s) from Codestral response"
@@ -52,7 +56,7 @@ module Calvin
       description = FileParser.parse_pr_body(content)
       Calvin::LOG.info(description ? "PR body extracted (#{description.bytesize} bytes)" : "PR body not found in response")
 
-      pr_url = commit_and_open_pr(files, issue: @issue, usage: usage, description: description)
+      pr_url = commit_and_open_pr(files, issue: @issue, usage: @last_usage, description: description)
       Calvin::LOG.info "##{@issue.number} done — PR: #{pr_url}"
       Success(pr_url)
     rescue StandardError => e
@@ -140,16 +144,9 @@ module Calvin
       prompt.match?(/test\//i) || prompt.match?(/\btest\b/i)
     end
 
-    # Inietta nel contesto tutto il necessario per scrivere test corretti:
-    #   1. .calvin/testing.yml        — convenzioni, classi base, helper, fixture catalogue
-    #   2. test/test_helper.rb        — codice reale di ApiTestCase e helpers
-    #   3. test/support/*.rb          — eventuali helper aggiuntivi
-    #   4. me_controller_test.rb      — esempio letterale di controller test da copiare
-    #   5. fixture dei model toccati dall'issue
     def inject_test_helpers(all_paths)
       blocks = []
 
-      # 1. testing.yml — la fonte di verità delle convenzioni test di questo progetto
       testing_yml = @github.get_file_content(TESTING_YML_PATH)
       if testing_yml
         Calvin::LOG.info "injecting #{TESTING_YML_PATH}"
@@ -158,14 +155,12 @@ module Calvin
         Calvin::LOG.warn "#{TESTING_YML_PATH} non trovato"
       end
 
-      # 2. test_helper.rb — classi base reali (ApiTestCase, auth_headers, json, put_json, post_json)
       helper = @github.get_file_content("test/test_helper.rb")
       if helper
         Calvin::LOG.info "injecting test/test_helper.rb"
         blocks << "---\ntest/test_helper.rb\n#{helper}\n---"
       end
 
-      # 3. test/support/*.rb — helper aggiuntivi se presenti
       support_files = @github.list_directory("test/support")
       support_files.select { |name| name.end_with?(".rb") }.each do |name|
         path    = "test/support/#{name}"
@@ -175,8 +170,6 @@ module Calvin
         blocks << "---\n#{path}\n#{content}\n---"
       end
 
-      # 4. Esempio letterale di controller test da copiare
-      #    Iniettato solo quando l'issue include controller test
       if needs_controller_test?(all_paths)
         example = @github.get_file_content(CONTROLLER_TEST_EXAMPLE)
         if example
@@ -185,7 +178,6 @@ module Calvin
         end
       end
 
-      # 5. Fixture dei model coinvolti nell'issue
       fixture_blocks = inject_model_fixtures(all_paths)
       blocks.concat(fixture_blocks)
 
@@ -194,13 +186,10 @@ module Calvin
       "\n\n## TEST CONTEXT (read carefully before writing any test)\n\n" + blocks.join("\n\n")
     end
 
-    # Controlla se tra i path dell'issue ci sono controller test
     def needs_controller_test?(all_paths)
       all_paths.any? { |p| p.include?("test/controllers") }
     end
 
-    # Estrae i model dai path dell'issue e inietta le fixture corrispondenti.
-    # es. app/models/preference_profile.rb → test/fixtures/preference_profiles.yml
     def inject_model_fixtures(paths)
       paths.filter_map do |path|
         match = path.match(MODEL_PATH_PATTERN)

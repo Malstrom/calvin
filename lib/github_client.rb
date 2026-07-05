@@ -59,6 +59,16 @@ module Calvin
       nil
     end
 
+    # Ritorna il contenuto di un file SENZA applicare repo_root.
+    # Usato da RunReporter per leggere .calvin/reports/ indipendentemente
+    # dal repo_root configurato per il progetto corrente.
+    def get_file_content_raw(path)
+      content = @client.contents(REPO, path: path)
+      Base64.decode64(content.content)
+    rescue Octokit::NotFound
+      nil
+    end
+
     # Lista i nomi dei file/directory in un path.
     # Path vuoto ("") = root del repo.
     # Applica repo_root se configurato.
