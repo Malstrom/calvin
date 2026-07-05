@@ -20,16 +20,14 @@
 #   list_dir(path)   → lista nomi nella directory
 #   done()           → termina l'esplorazione e avvia implement_phase
 #
-# Formato risposta modello durante esplorazione (sempre JSON su una riga):
+# Formato risposta modello durante esplorazione (sempre JSON):
 #   {"thought": "...", "tool": "...", "args": {...}}
+#   Accettato sia su una riga che multi-riga (parse robusto).
 #
 # Stack determinato dalla label dell'issue ("rails" | "flutter").
 # Default: "rails".
 #
 # .run → { content: String, turns: Integer, usage: Hash | nil, temperature: Float }
-
-require "json"
-require_relative "file_parser"
 
 module Calvin
   class ReActLoop
@@ -48,9 +46,9 @@ module Calvin
       @json_failures    = 0
       @not_found_streak = 0
 
-      sampling           = Calvin::CONFIG.dig(:sampling, :temperature) || {}
-      @temp_explore      = sampling[:explore]    || sampling["explore"]    || 0.1
-      @temp_implement    = sampling[:implement]  || sampling["implement"]  || 0.0
+      sampling        = Calvin::CONFIG.dig(:sampling, :temperature) || {}
+      @temp_explore   = sampling[:explore]   || sampling["explore"]   || 0.1
+      @temp_implement = sampling[:implement] || sampling["implement"] || 0.0
 
       setup_messages
     end
@@ -226,16 +224,34 @@ module Calvin
       "ERROR: #{e.message}"
     end
 
+    # Parsa il JSON prodotto dal modello in modo robusto.
+    #
+    # Codestral può rispondere in tre forme:
+    #   1. One-liner:   {"thought": "...", "tool": "read_file", "args": {...}}
+    #   2. Multi-riga:  oggetto JSON spalmato su più righe
+    #   3. Con fence:   ```json\n{...}\n```
+    #
+    # Strategia:
+    #   a. Rimuovi fence markdown se presenti
+    #   b. Prova JSON.parse sull'intero testo (caso multi-riga)
+    #   c. Se fallisce, cerca la prima riga che inizia con '{' (caso one-liner)
+    #   d. Se nessuno funziona → nil → handle_json_failure
     def parse_action(raw)
       cleaned = raw.strip
-                   .gsub(/\A```(?:json)?\n?/, "")
-                   .gsub(/\n?```\z/, "")
-                   .lines
-                   .find { |l| l.strip.start_with?("{") }&.strip
-      return nil unless cleaned
-      JSON.parse(cleaned)
-    rescue JSON::ParseError => e
-      Calvin::LOG.warn "ReAct JSON error: #{e.message}"
+                   .gsub(/\A```(?:json)?\s*\n?/, "")
+                   .gsub(/\n?```\s*\z/, "")
+                   .strip
+
+      # Tentativo 1: intero contenuto come JSON (multi-riga e one-liner)
+      return JSON.parse(cleaned) if cleaned.start_with?("{")
+
+      # Tentativo 2: prima riga che inizia con '{' (modello ha aggiunto testo prima)
+      first_json_line = cleaned.lines.find { |l| l.strip.start_with?("{") }&.strip
+      return JSON.parse(first_json_line) if first_json_line
+
+      nil
+    rescue JSON::ParserError => e
+      Calvin::LOG.warn "ReAct JSON error: #{e.message.lines.first&.strip}"
       nil
     end
   end

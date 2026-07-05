@@ -24,8 +24,6 @@
 #     test_pass_pct: nil
 #   )
 
-require "csv"
-
 module Calvin
   module RunReporter
     REPORTS_DIR = ".calvin/reports"
@@ -98,7 +96,6 @@ module Calvin
 
       md_content = build_md(rows)
 
-      # Commit sul default branch — non più hardcoded "main"
       github.commit_files_atomically(
         [
           { path: CSV_PATH, content: csv_content },
@@ -112,8 +109,6 @@ module Calvin
     rescue => e
       Calvin::LOG.warn "RunReporter FAILED: #{e.class} — #{e.message}\n#{e.backtrace.first(3).join("\n")}"
     end
-
-    # ── private ────────────────────────────────────────────────────────────────
 
     def self.calculate_cost(prompt_tok, compl_tok, model, pricing)
       p            = pricing[model.to_sym] || pricing[model] || {}
@@ -134,11 +129,11 @@ module Calvin
           explore_turns, pct, temperature, files_written, issue_length = r
         date    = run_at.to_s[0..15].tr("T", " ")
         emoji   = STATUS_EMOJI[status] || "❓"
-        pct_s   = pct.to_s.empty?            ? "—" : "#{pct}%"
-        turns_s = explore_turns.to_s.empty?  ? "—" : explore_turns.to_s
-        temp_s  = temperature.to_s.empty?    ? "—" : temperature.to_s
-        files_s = files_written.to_s.empty?  ? "—" : files_written.to_s
-        ilen_s  = issue_length.to_s.empty?   ? "—" : issue_length.to_s
+        pct_s   = pct.to_s.empty?           ? "—" : "#{pct}%"
+        turns_s = explore_turns.to_s.empty? ? "—" : explore_turns.to_s
+        temp_s  = temperature.to_s.empty?   ? "—" : temperature.to_s
+        files_s = files_written.to_s.empty? ? "—" : files_written.to_s
+        ilen_s  = issue_length.to_s.empty?  ? "—" : issue_length.to_s
         "| #{date} | #{workflow} | \##{ref} | #{model} | #{format_num(pt)} | #{format_num(ct)} | #{format_num(tt)} | $#{cost} | #{emoji} #{status} | #{turns_s} | #{pct_s} | #{temp_s} | #{files_s} | #{ilen_s} |"
       end
 

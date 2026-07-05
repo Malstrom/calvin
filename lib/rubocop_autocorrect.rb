@@ -8,9 +8,6 @@
 # Uso:
 #   Calvin::RubocopAutocorrect.run(files:, branch:, github:)
 
-require "fileutils"
-require "tmpdir"
-
 module Calvin
   module RubocopAutocorrect
     def self.run(files:, branch:, github:)
@@ -21,7 +18,6 @@ module Calvin
       end
 
       Dir.mktmpdir("calvin-rubocop-") do |tmpdir|
-        # Scrivi i file nella tmpdir rispettando la struttura delle cartelle
         rb_files.each do |f|
           dest = File.join(tmpdir, f[:path])
           FileUtils.mkdir_p(File.dirname(dest))
@@ -29,11 +25,21 @@ module Calvin
         end
 
         rubocop_config = find_rubocop_config
-        config_flag    = rubocop_config ? "--config #{rubocop_config}" : ""
-        targets        = rb_files.map { |f| File.join(tmpdir, f[:path]) }.join(" ")
+        # Argomenti come array — nessuna interpolazione shell, nessun injection risk.
+        # I path vengono passati come elementi separati, non come stringa unica.
+        cmd = ["rubocop", "--autocorrect", "--format", "quiet"]
+        cmd += ["--config", rubocop_config] if rubocop_config
+        cmd += rb_files.map { |f| File.join(tmpdir, f[:path]) }
 
-        output = `rubocop #{config_flag} --autocorrect --format quiet #{targets} 2>&1`
-        Calvin::LOG.info "RubocopAutocorrect: #{output.strip.split("\n").last}"
+        output, status = Open3.capture2e(*cmd)
+        Calvin::LOG.info "RubocopAutocorrect: exit #{status.exitstatus} — #{output.strip.lines.last&.strip}"
+
+        # exit 0 = nessun offense, exit 1 = autocorrected (o offense rimasti)
+        # exit 2+ = errore rubocop stesso (config mancante, crash, ecc.)
+        if status.exitstatus.to_i >= 2
+          Calvin::LOG.warn "RubocopAutocorrect: rubocop exit #{status.exitstatus} — skip commit"
+          return
+        end
 
         corrected = rb_files.filter_map do |f|
           new_content = File.read(File.join(tmpdir, f[:path]))

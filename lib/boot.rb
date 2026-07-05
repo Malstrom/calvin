@@ -1,14 +1,27 @@
 # frozen_string_literal: true
 # Bootstrap Calvin — caricato una sola volta da bin/calvin.rb.
 # Tutti i require vivono qui. bin/calvin.rb non sa nulla di gem o dipendenze.
+#
+# Convenzione:
+#   - Gem di terze parti: require "nome"
+#   - Stdlib Ruby:        require "nome"  (stesso stile, stessa lista)
+#   - File interni:       require_relative nei singoli file NON usato
+#                         (tutti i moduli Calvin sono caricati da qui)
 
+# Gem
 require "dry/monads"
 require "dry/transaction"
 require "octokit"
 require "base64"
+
+# Stdlib
 require "logger"
 require "yaml"
 require "open3"
+require "json"
+require "csv"
+require "fileutils"
+require "tmpdir"
 
 # Calvin::CONFIG deve essere definito PRIMA di qualsiasi require_relative,
 # perché le costanti di classe nei file caricati vengono evaluate
