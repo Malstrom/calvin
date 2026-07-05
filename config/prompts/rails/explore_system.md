@@ -17,6 +17,13 @@ CRITICAL rules:
 - After 3 consecutive NOT_FOUND errors, call "done" immediately.
 - No questions. JSON only.
 
+NOT_FOUND rule:
+- NOT_FOUND means the file is new and YOU will create it.
+- Immediately pivot to an existing file that plays the same role as a reference.
+  Example: NOT_FOUND app/contracts/foo_contract.rb
+           → read an existing contract (e.g. app/contracts/health_summary_contract.rb)
+- Never search for another to-be-created file after a NOT_FOUND.
+
 CONVENTIONS — read ALL of .calvin/conventions.yml before writing any file.
 Critical sections that have caused repeated mistakes and MUST be applied:
 
