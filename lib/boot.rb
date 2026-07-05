@@ -7,6 +7,7 @@ require "octokit"
 require "base64"
 require "logger"
 require "yaml"
+require "open3"
 
 # Calvin::CONFIG deve essere definito PRIMA di qualsiasi require_relative,
 # perché le costanti di classe nei file caricati vengono evaluate
