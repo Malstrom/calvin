@@ -4,11 +4,122 @@ language:
   filenames: english
 
 role: |
-  Dev assistant for Calvin. Works in chat with Igor to create and
-  refine epics and tasks using the templates (issue_epic.md,
-  issue_task.md), and to write dense agent prompts (agent_prompt.md).
-  Never modifies the target repo without explicit confirmation.
-  Never adds the `agent` label without explicit confirmation.
+  Dev assistant for Calvin. Works in chat with Igor to:
+  1. Write and refine epics and tasks for the target repo (synca)
+  2. Improve Calvin itself — prompt engineering, Ruby fixes, architecture
+  3. Debug failures visible in synca/.calvin/reports/ or CI runs
+  4. Push fixes directly to main (no PR unless Igor asks explicitly)
+  Never modifies anything without explicit confirmation from Igor.
+
+# ── Architecture ──────────────────────────────────────────────────────────────
+# Calvin is a GitHub Actions agent written in Ruby (no Rails).
+# Entry point: bin/calvin.rb
+#
+# Two distinct flows:
+#
+# ExploreFlow  (triggered by label "calvin" on a synca issue)
+#   └─ ContextBuilder        builds issue prompt string
+#   └─ ReActLoop             multi-turn LLM loop
+#        PHASE 1 — EXPLORE  (explore_system.md as system, tools: read_file/list_dir/done)
+#                            loop accumulates observations until done() or MAX_TURNS
+#        PHASE 2 — IMPLEMENT (implement_system.md as system, fresh context)
+#                            single call → FILE: blocks + PR_BODY
+#   └─ FileParser            parses FILE: blocks from LLM output
+#   └─ CommitAndPr           commits files + opens PR on synca
+#   └─ RubocopAutocorrect    post-step: autocorrects Ruby style
+#   └─ RunReporter           post-step: appends row to synca/.calvin/reports/runs.csv
+#
+# CiFixFlow  (triggered by CALVIN_FIX_MODE=true, e.g. failing CI on a Calvin PR)
+#   └─ classifies error as :structural / :logical / :infra
+#   └─ only :structural errors are auto-fixed (syntax, rubocop)
+#   └─ FixPromptBuilder      builds fix prompt programmatically (no markdown file)
+#   └─ MistralClient.complete  single call, model: codestral-latest
+#   └─ FileParser + commit_fix + post_comment
+#
+# Model: Mistral codestral-latest for all LLM calls
+# Pricing: config/calvin.yml → pricing.models
+
+# ── Repo structure ────────────────────────────────────────────────────────────
+repo_structure:
+  bin/calvin.rb:          entry point, flow routing (ExploreFlow vs CiFixFlow)
+
+  lib/:
+    boot.rb:              requires, Calvin::CONFIG, logging
+    react_loop.rb:        ReActLoop — multi-turn explore + single implement call
+    explore_flow.rb:      ExploreFlow orchestrator
+    context_builder.rb:   builds issue prompt string (title + body → string)
+    file_parser.rb:       parses FILE: blocks from LLM text output
+    commit_and_pr.rb:     commits parsed files + opens PR on synca
+    mistral_client.rb:    HTTP client for Mistral API (chat completions)
+    github_client.rb:     GitHub API wrapper (file read/write, PR, comments)
+    rubocop_autocorrect.rb: post-step rubocop -A on committed Ruby files
+    run_reporter.rb:      appends run stats to synca/.calvin/reports/runs.csv + runs.md
+    issue_commenter.rb:   posts comments on synca issues
+    pr_body_builder.rb:   extracts PR_BODY_START…PR_BODY_END block from LLM output
+
+  config/:
+    calvin.yml:           runtime config (max_turns, model, repo paths, pricing)
+    prompts/rails/:
+      explore_system.md:  system prompt for PHASE 1 (multi-turn explore loop)
+      implement_system.md: system prompt for PHASE 2 (single implement call)
+                          Contains all domain rules: migration, model, contract,
+                          controller, routes, service, test rules, output format.
+                          KEY: "Do not test models" rule lives here in Output format
+                          section — model tests are NEVER generated.
+
+  # Note: response_format.md does NOT exist / is not loaded anywhere — orphan.
+  # Note: CiFixFlow has no markdown prompt file; system prompt is built in Ruby.
+
+# ── Prompt files ──────────────────────────────────────────────────────────────
+prompt_files:
+  explore_system.md:
+    path: config/prompts/rails/explore_system.md
+    used_in: ReActLoop PHASE 1 (multi-turn, sent once as system message)
+    critical: JSON format for tool calls — parser expects line starting with "{"
+
+  implement_system.md:
+    path: config/prompts/rails/implement_system.md
+    used_in: ReActLoop PHASE 2 (single call, fresh context)
+    critical: |
+      - Rule order matters due to recency bias (Mistral weights end of prompt)
+      - "except models" exception is in Output format section, adjacent to
+        "tests are mandatory" — intentional placement to beat recency bias
+      - Domain rules: migration version, enum-only models, contract validation,
+        controller pattern (case/in), service monads, fixture safety
+
+# ── Target repo ───────────────────────────────────────────────────────────────
+target_repo:
+  name: synca
+  owner: Malstrom
+  calvin_files:
+    - backend/api/.calvin/reports/runs.csv   # run stats, appended each run
+    - backend/api/.calvin/reports/runs.md    # markdown table, regenerated each run
+  test_structure:
+    - test/models/       # always empty (only .keep) — model tests are forbidden
+    - test/controllers/  # controller tests live here
+    - test/services/     # service tests live here
+    - test/contracts/    # contract tests live here
+
+# ── Working principles ────────────────────────────────────────────────────────
+working_principles:
+  - Push directly to main unless Igor explicitly asks for a PR
+  - Always read the relevant file before modifying it (get SHA for updates)
+  - When fixing a prompt: understand recency bias — critical rules go LAST
+  - CSV rows must always be padded to CSV_HEADER.size columns (fixed 2026-07-06)
+  - When Calvin generates model tests in a PR, delete them and fix implement_system.md
+  - Never merge PRs without Igor's confirmation
+  - This space is for improving Calvin, not just writing synca issues
+
+# ── Known recurring issues ────────────────────────────────────────────────────
+known_issues:
+  model_tests_generated:
+    status: fixed (2026-07-06)
+    fix: implement_system.md Output format — "except models" added adjacent to
+         "tests are mandatory"; Do not test models section → cross-reference only
+  csv_jagged_rows:
+    status: fixed (2026-07-06)
+    fix: run_reporter.rb — r.fill(nil, r.size...CSV_HEADER.size) before csv << r
+         and before build_md destructuring
 
 scenarios:
   spec: .scenarios.yml
@@ -18,10 +129,11 @@ scenarios:
 workspace:
   calvin:
     - path: .scenarios.yml
-    - path: templates/
-    - path: bin/
+    - path: config/prompts/rails/
     - path: lib/
+    - path: bin/
+    - path: config/calvin.yml
   target:
-    - path: .calvin/
+    - path: backend/api/.calvin/
     - path: backend/api
     - path: ios
