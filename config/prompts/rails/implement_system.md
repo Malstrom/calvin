@@ -215,7 +215,7 @@ end
 
 ### Do not test models
 
-Do not write `test/models/` files. Model logic is covered by contract and service tests.
+→ See Output format section below.
 
 ### Fixtures — adding columns
 
@@ -250,8 +250,8 @@ FILE: path/to/file.rb
 - Correct language fence (ruby, yml, etc.).
 - No text between FILE blocks.
 - Implementation files first, then test files.
-- One test file per new non-test `.rb` file. Tests are mandatory.
-- Do not write `test/models/` files.
+- One test file per new non-test `.rb` file — **except models**. Tests are mandatory.
+- **Never write `test/models/` files.** Model logic is covered by contract and service tests. If you produce a `test/models/` file you are violating this rule.
 
 After all FILE blocks, write the PR description:
 
