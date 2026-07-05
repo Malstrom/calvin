@@ -1,16 +1,23 @@
 # frozen_string_literal: true
-# Costruisce il contesto per entrambi i flussi (aider e comment).
+# Costruisce il prompt per i flussi Calvin.
 #
-# Cerca il commento con marker <!-- agent-prompt --> sull'issue e lo restituisce.
-# Questo è il contratto unico: niente più file .calvin/, niente source_files.
+# Priorità:
+#   1. Label "calvin-auto-body" sull'issue
+#      → usa title + body, ignora commenti (override esplicito)
+#   2. Commento con marker <!-- agent-prompt -->
+#      → comportamento standard, invariato
+#   3. Fallback automatico: nessun commento agent-prompt trovato
+#      → usa title + body con avviso
 #
-# .build(issue, github) -> String (il prompt) | raise se non trovato
+# Nei casi 1 e 3 viene preposto un avviso al prompt così è sempre
+# chiaro da dove viene il contenuto.
 
 require "octokit"
 
 module Calvin
   class ContextBuilder
-    AGENT_PROMPT_MARKER = "<!-- agent-prompt -->"
+    AGENT_PROMPT_MARKER  = "<!-- agent-prompt -->"
+    BODY_LABEL           = "calvin-auto-body"
 
     def self.build(issue, github_client:)
       new(issue, github_client).build
@@ -22,20 +29,49 @@ module Calvin
     end
 
     def build
+      labels = @issue.labels.map(&:name)
+
+      # Caso 1: label calvin-auto-body — usa title+body, ignora commenti
+      if labels.include?(BODY_LABEL)
+        Calvin::LOG.info "agent-prompt: label '#{BODY_LABEL}' presente, uso title+body (override)"
+        return build_from_issue(override: true)
+      end
+
+      # Caso 2: commento con marker <!-- agent-prompt -->
       comments = @github_client.issue_comments(@issue)
+      comment  = comments.find { |c| c.body.lstrip.start_with?(AGENT_PROMPT_MARKER) }
 
-      if comments.empty?
-        raise "Nessun commento trovato sull'issue ##{@issue.number}."
+      if comment
+        Calvin::LOG.info "agent-prompt: trovato commento ##{comment.id} (#{comment.body.bytesize} bytes)"
+        return comment.body
       end
 
-      comment = comments.find { |c| c.body.lstrip.start_with?(AGENT_PROMPT_MARKER) }
+      # Caso 3: fallback automatico su title+body
+      Calvin::LOG.info "agent-prompt: nessun commento trovato, fallback su title+body issue ##{@issue.number}"
+      build_from_issue(override: false)
+    end
 
-      if comment.nil?
-        raise "Nessun commento con marker '#{AGENT_PROMPT_MARKER}' sull'issue ##{@issue.number}."
+    private
+
+    def build_from_issue(override:)
+      title = @issue.title.to_s.strip
+      body  = @issue.body.to_s.strip
+
+      content = [title, body].reject(&:empty?).join("\n\n")
+
+      if content.empty?
+        raise "Issue ##{@issue.number}: title e body vuoti — impossibile costruire il prompt."
       end
 
-      Calvin::LOG.info "agent-prompt: trovato commento ##{comment.id} (#{comment.body.bytesize} bytes)"
-      comment.body
+      Calvin::LOG.info "agent-prompt: title+body (#{content.bytesize} bytes, override=#{override})"
+
+      warning = if override
+        "⚠️ Prompt generato da title+body dell'issue ##{@issue.number} (label: #{BODY_LABEL})."
+      else
+        "⚠️ Prompt generato automaticamente da title+body dell'issue ##{@issue.number} (nessun commento agent-prompt trovato)."
+      end
+
+      "#{warning}\n#{"\u2500" * 72}\n\n#{content}"
     end
   end
 end

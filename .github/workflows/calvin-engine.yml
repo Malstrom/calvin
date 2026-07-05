@@ -9,10 +9,6 @@ on:
       target_repo:
         required: true
         type: string
-      aider_mode:
-        required: false
-        type: boolean
-        default: false
       auto_mode:
         required: false
         type: boolean
@@ -43,13 +39,13 @@ jobs:
           token: ${{ secrets.SYNCA_TOKEN }}
           path: target
 
-      # 3. Git identity (necessaria per i commit di Aider)
+      # 3. Git identity
       - name: Configure git identity
         run: |
           git config --global user.email "calvin@synca.app"
           git config --global user.name "Calvin"
 
-      # 4. Ruby + gem di Calvin (octokit, dry-monads, rubocop)
+      # 4. Ruby + gem di Calvin
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
@@ -58,12 +54,7 @@ jobs:
         run: bundle install
         working-directory: calvin/bin
 
-      # 5. Python + Aider (solo modalità aider)
-      - name: Install Aider
-        if: ${{ inputs.aider_mode }}
-        run: pip install --quiet aider-chat
-
-      # 6. Esegue Calvin
+      # 5. Esegue Calvin
       - name: Run Calvin
         run: bundle exec ruby $GITHUB_WORKSPACE/calvin/bin/calvin.rb
         working-directory: target
@@ -74,5 +65,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           CALVIN_MODEL: codestral-latest
-          CALVIN_AIDER_MODE: ${{ inputs.aider_mode }}
           CALVIN_AUTO_MODE: ${{ inputs.auto_mode }}
