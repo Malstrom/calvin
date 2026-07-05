@@ -1,8 +1,8 @@
 # frozen_string_literal: true
-# Flusso autonomo Calvin (calvin-auto).
+# Flusso autonomo Calvin (calvin-auto / calvin-auto-body).
 # Pipeline dry-transaction con 4 step espliciti:
 #
-#   build_prompt   — costruisce il prompt dall'issue
+#   build_prompt   — ContextBuilder costruisce il prompt (gestisce label, commenti, fallback)
 #   react_loop     — ReActLoop: il modello esplora e implementa
 #   parse_files    — estrae FILE: blocks e PR_BODY
 #   commit_and_pr  — branch + commit + PR
@@ -12,6 +12,7 @@
 #   Failure({ step:, error:, usage: })
 
 require "dry/transaction"
+require_relative "context_builder"
 require_relative "file_parser"
 require_relative "react_loop"
 require_relative "commit_and_pr"
@@ -32,17 +33,7 @@ module Calvin
     private
 
     def build_prompt(github:, issue:)
-      top_level = github.list_directory("").join(", ") rescue "(non disponibile)"
-      prompt = <<~PROMPT
-        # Task: #{issue.title}
-
-        #{issue.body.to_s.strip}
-
-        ## Struttura top-level del repo
-        #{top_level}
-
-        Esplora il repo, leggi i file rilevanti, poi implementa il task.
-      PROMPT
+      prompt = ContextBuilder.build(issue, github_client: github)
       Success(github: github, issue: issue, prompt: prompt)
     rescue => e
       Failure(step: :build_prompt, error: e.message, usage: nil)

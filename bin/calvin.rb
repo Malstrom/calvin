@@ -2,9 +2,10 @@
 # Orchestratore Calvin — entry point per GitHub Actions.
 #
 # Routing:
-#   CALVIN_FIX_MODE=true  → CiFixFlow   (trigger da workflow ci-fix)
-#   label calvin-auto     → ExploreFlow  (ReActLoop)
-#   default               → ImplementFlow
+#   CALVIN_FIX_MODE=true   → CiFixFlow
+#   label calvin-auto      → ExploreFlow  (prompt da commento agent-prompt)
+#   label calvin-auto-body → ExploreFlow  (prompt da title+body, gestito da ContextBuilder)
+#   default                → ImplementFlow
 
 require_relative "../lib/boot"
 
@@ -71,33 +72,34 @@ if ENV["CALVIN_FIX_MODE"] == "true"
   exit(result.success? ? 0 : 1)
 end
 
-# ── Fetch issue (auto + direct mode) ──────────────────────────────────────────
+# ── Fetch issue ───────────────────────────────────────────────────────────────
 temp_github = Calvin::GitHubClient.new
 issue       = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
 labels      = issue.labels.map(&:name)
 
 repo_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last || ""
-Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
 Calvin::LOG.info "labels: #{labels.join(', ')}"
+Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
 
 github = Calvin::GitHubClient.new(repo_root: repo_root)
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
 
-# ── Auto mode (label calvin-auto) ─────────────────────────────────────────────
-if labels.include?("calvin-auto")
-  Calvin::LOG.info "mode: auto (ExploreFlow)"
+# ── Auto mode (ExploreFlow — prompt gestito da ContextBuilder) ────────────────
+if labels.include?("calvin-auto") || labels.include?("calvin-auto-body")
+  workflow = labels.include?("calvin-auto-body") ? "calvin-auto-body" : "calvin-auto"
+  Calvin::LOG.info "mode: #{workflow} (ExploreFlow)"
 
   result = Calvin::ExploreFlow.run(github, issue)
   run_post_steps(result,
     github:   github,
-    workflow: "calvin-auto",
+    workflow: workflow,
     ref:      issue.number,
     extra:    { issue: issue }
   )
   exit(result.success? ? 0 : 1)
 end
 
-# ── Direct mode (label calvin-direct, default) ────────────────────────────────
+# ── Direct mode (default) ─────────────────────────────────────────────────────
 Calvin::LOG.info "mode: direct (ImplementFlow)"
 
 result = Calvin::ImplementFlow.run(github, issue)
