@@ -57,9 +57,14 @@ rule(preferences: :temperature_preference) { key.failure('invalid') unless VALID
 
 - Always use ApiResponse helpers: `render_success`, `render_created`, `render_error`, `render_contract_errors`. Never `render json:`.
 - Always use `case/in` pattern matching on service results.
+- Extract nested params with `params[:key].to_h` — never `to_unsafe_h`, never `permit!`.
 
 CORRECT:
 ```ruby
+contract_result = UpsertPreferencesContract.new.call(
+  preferences: params[:preferences].to_h
+)
+
 case UpsertPreferencesService.call(current_user: current_user, attrs: contract_result.to_h[:preferences])
 in Success[preference_profile]
   render_success({ preferences: PreferencesSerializer.new(preference_profile).serializable_hash })
@@ -69,8 +74,27 @@ end
 ```
 WRONG:
 ```ruby
+params[:preferences]&.to_unsafe_h || {}  # ActionController::Parameters leak
 if result.success?
   render json: { preferences: result.value! }
+end
+```
+
+### Routes
+
+- When adding a route inside an existing `namespace` block, mirror the exact `to:` string pattern of adjacent routes in that same block.
+- Do not repeat the namespace name in the `to:` string — Rails prepends it automatically.
+
+CORRECT (adding inside `namespace :signals`):
+```ruby
+namespace :signals do
+  post :preferences, to: 'preferences#create'
+end
+```
+WRONG:
+```ruby
+namespace :signals do
+  post :preferences, to: 'signals/preferences#create'  # double-namespace → 404
 end
 ```
 
@@ -87,7 +111,8 @@ class UpsertPreferencesService
 
   def call(current_user:, attrs:)
     profile = PreferenceProfile.find_or_initialize_by(user: current_user)
-    profile.update(attrs) ? Success(profile) : Failure([:validation_failed, profile.errors.full_messages.first])
+    profile.assign_attributes(attrs)
+    profile.save ? Success(profile) : Failure([:validation_failed, profile.errors.full_messages.first])
   end
 end
 ```
@@ -110,22 +135,26 @@ For every service, write one test per return path:
 
 Missing a branch = missing a test = rule violation.
 
-### Contract tests — Dry::Validation::Result, not monads
+### Contract tests — error messages are strings, not symbols
 
 `Contract.new.call(...)` returns `Dry::Validation::Result`, not `Dry::Monads::Result`.
 Use `success?`, `failure?`, `errors.to_h`. Never `assert_pattern { result => Success }`.
+
+`errors.to_h` returns arrays of **strings** — not symbols. Assert the exact message string.
 
 CORRECT:
 ```ruby
 result = UpsertPreferencesContract.new.call(preferences: { rhythm_importance: 6 })
 assert result.failure?
-assert_includes result.errors.to_h[:preferences][:rhythm_importance], :included_in?
+assert_includes result.errors.to_h[:preferences][:rhythm_importance], "must be one of: 1 - 5"
 ```
 WRONG:
 ```ruby
-include Dry::Monads[:result]
+assert_includes result.errors.to_h[:preferences][:rhythm_importance], :included_in?  # symbol, not a string
 assert_pattern { result => Failure }  # Dry::Validation::Result is not a monad
 ```
+
+To discover the exact error message string for a field, read an existing contract test in the codebase — do not guess.
 
 ### Service tests — Dry::Monads API
 
@@ -143,18 +172,21 @@ WRONG: `result.value`
 ### Service tests — fixtures and unique indexes
 
 Check fixtures before creating records. If a fixture already covers the user, reuse it.
+Never call `destroy_all` — it destroys fixtures for all tests running in the same suite.
 
 CORRECT: call the service on `users(:alice)` — `find_or_initialize_by` will find the existing `alice_prefs`.
 WRONG:
 ```ruby
+PreferenceProfile.destroy_all  # destroys fixtures for every other test
 PreferenceProfile.create!(user: users(:alice), ...)  # PG::UniqueViolation — alice_prefs already exists
 ```
 
-### Controller tests — setup
+### Controller tests — setup and request format
 
 - Inherit from `ApiTestCase`.
 - Use `@headers = auth_headers(users(:alice))`.
 - Only reference fixtures that exist in `test/fixtures/`. Read the fixture file during exploration.
+- Always pass `as: :json` — controller reads params from JSON body.
 - Mirror the request format of an existing controller test — never invent it.
 
 CORRECT:
@@ -164,12 +196,20 @@ class Api::V1::Signals::PreferencesControllerTest < ApiTestCase
     @user = users(:alice)
     @headers = auth_headers(@user)
   end
+
+  test 'successful update' do
+    post api_v1_signals_preferences_path,
+         params: { preferences: { rhythm_importance: 4 } },
+         headers: @headers,
+         as: :json
+    assert_response :success
+  end
 end
 ```
 WRONG:
 ```ruby
 class Api::V1::Signals::PreferencesControllerTest < ActionDispatch::IntegrationTest
-  @headers = auth_headers(users(:guest_user))  # guest_user may not exist
+  post path, params: { preferences: { field: value } }, headers: @headers  # missing as: :json → params parse error
 end
 ```
 
@@ -193,6 +233,8 @@ WRONG: changing `travel_style: 2` to `travel_style: 1` while adding new columns.
 ---
 
 ## Output format
+
+Paths in FILE blocks are relative to the application root. Do not include `backend/api/` prefix — it is added automatically when committing.
 
 For every file to create or modify, output a FILE block:
 
