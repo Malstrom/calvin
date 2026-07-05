@@ -3,7 +3,7 @@
 #
 # Routing:
 #   CALVIN_FIX_MODE=true  → CiFixFlow   (trigger da workflow ci-fix)
-#   label calvin-auto     → ExploreFlow
+#   label calvin-auto     → ExploreFlow  (ReActLoop)
 #   default               → ImplementFlow
 
 require_relative "../lib/boot"
@@ -58,7 +58,7 @@ if ENV["CALVIN_FIX_MODE"] == "true"
   github = Calvin::GitHubClient.new(repo_root: "backend/api")
   Calvin::LOG.info "fix mode — PR ##{pr_number} branch: #{pr_branch}"
 
-  result = Calvin::CiFixFlow.new(github, pr_number, pr_branch, test_output).run
+  result = Calvin::CiFixFlow.run(github, pr_number, pr_branch, test_output)
   Calvin::LOG.info "CiFixFlow result: #{result.success? ? result.value! : result.failure}"
 
   run_post_steps(result,
@@ -78,6 +78,7 @@ labels      = issue.labels.map(&:name)
 
 repo_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last || ""
 Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
+Calvin::LOG.info "labels: #{labels.join(', ')}"
 
 github = Calvin::GitHubClient.new(repo_root: repo_root)
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
@@ -86,7 +87,7 @@ Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
 if labels.include?("calvin-auto")
   Calvin::LOG.info "mode: auto (ExploreFlow)"
 
-  result = Calvin::ExploreFlow.new(github, issue).run
+  result = Calvin::ExploreFlow.run(github, issue)
   run_post_steps(result,
     github:   github,
     workflow: "calvin-auto",
@@ -99,7 +100,7 @@ end
 # ── Direct mode (label calvin-direct, default) ────────────────────────────────
 Calvin::LOG.info "mode: direct (ImplementFlow)"
 
-result = Calvin::ImplementFlow.new(github, issue).run
+result = Calvin::ImplementFlow.run(github, issue)
 run_post_steps(result,
   github:   github,
   workflow: "calvin-direct",

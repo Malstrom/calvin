@@ -25,57 +25,51 @@ module Calvin
     step :parse_files
     step :commit_and_pr
 
-    def initialize(github, issue)
-      @github = github
-      @issue  = issue
-      @usage  = nil
-      super()
+    def self.run(github, issue)
+      new.call(github: github, issue: issue)
     end
-
-    attr_reader :usage
 
     private
 
-    def build_prompt(_input)
-      top_level = @github.list_directory("").join(", ") rescue "(non disponibile)"
+    def build_prompt(github:, issue:)
+      top_level = github.list_directory("").join(", ") rescue "(non disponibile)"
       prompt = <<~PROMPT
-        # Task: #{@issue.title}
+        # Task: #{issue.title}
 
-        #{@issue.body.to_s.strip}
+        #{issue.body.to_s.strip}
 
         ## Struttura top-level del repo
         #{top_level}
 
         Esplora il repo, leggi i file rilevanti, poi implementa il task.
       PROMPT
-      Success(prompt: prompt)
+      Success(github: github, issue: issue, prompt: prompt)
     rescue => e
       Failure(step: :build_prompt, error: e.message, usage: nil)
     end
 
-    def react_loop(prompt:)
-      Calvin::LOG.info "ExploreFlow: avvio ReActLoop per issue ##{@issue.number}"
-      result = ReActLoop.new(@github, prompt).run
+    def react_loop(github:, issue:, prompt:)
+      Calvin::LOG.info "ExploreFlow: avvio ReActLoop per issue ##{issue.number}"
+      result = ReActLoop.new(github, prompt).run
       Calvin::LOG.info "ReActLoop terminato in #{result[:turns]} turn(s)"
-      @usage = result[:usage]
-      Success(content: result[:content], usage: result[:usage])
+      Success(github: github, issue: issue, content: result[:content], usage: result[:usage])
     rescue => e
-      Failure(step: :react_loop, error: e.message, usage: @usage)
+      Failure(step: :react_loop, error: e.message, usage: nil)
     end
 
-    def parse_files(content:, usage:)
+    def parse_files(github:, issue:, content:, usage:)
       files = FileParser.parse(content)
       return Failure(step: :parse_files, error: "nessun FILE: block prodotto dal modello", usage: usage) if files.empty?
       description = FileParser.parse_pr_body(content)
       Calvin::LOG.info "parse_files: #{files.size} file(s) — PR body: #{description ? 'trovato' : 'assente'}"
-      Success(files: files, usage: usage, description: description)
+      Success(github: github, issue: issue, files: files, usage: usage, description: description)
     end
 
-    def commit_and_pr(files:, usage:, description:)
+    def commit_and_pr(github:, issue:, files:, usage:, description:)
       CommitAndPr.call(
         files:         files,
-        issue:         @issue,
-        github:        @github,
+        issue:         issue,
+        github:        github,
         branch_prefix: "auto",
         usage:         usage,
         description:   description

@@ -34,32 +34,27 @@ module Calvin
     step :post_comment
     step :commit_and_pr
 
-    def initialize(github, issue)
-      @github = github
-      @issue  = issue
-      @usage  = nil
-      super()
+    def self.run(github, issue)
+      new.call(github: github, issue: issue)
     end
-
-    attr_reader :usage
 
     private
 
-    def build_prompt(_input)
-      prompt = ContextBuilder.build(@issue, github_client: @github)
-      Success(prompt: prompt)
+    def build_prompt(github:, issue:)
+      prompt = ContextBuilder.build(issue, github_client: github)
+      Success(github: github, issue: issue, prompt: prompt)
     rescue => e
       Failure(step: :build_prompt, error: e.message, usage: nil)
     end
 
-    def enrich_prompt(prompt:)
+    def enrich_prompt(github:, issue:, prompt:)
       all_paths      = prompt.scan(FILE_LIST_PATTERN).map { |path, _| path.strip }
       modified_paths = prompt.scan(FILE_LIST_PATTERN).filter_map { |path, status|
         path.strip if status.downcase == "modified"
       }
 
       injected = modified_paths.filter_map do |path|
-        content = @github.get_file_content(path)
+        content = github.get_file_content(path)
         next unless content
         Calvin::LOG.info "enrich_prompt: injecting #{path}"
         "---\n#{path}\n#{content}\n---"
@@ -68,13 +63,13 @@ module Calvin
       file_context = injected.empty? ? "" : "\n\n## EXISTING FILE CONTENTS\n\n#{injected}"
 
       test_context = if prompt.match?(/test\//i) || prompt.match?(/\btest\b/i)
-        TestContextInjector.build(paths: all_paths, github: @github)
+        TestContextInjector.build(paths: all_paths, github: github)
       else
         ""
       end
 
       project_conventions = begin
-        extra = @github.get_file_content(PROJECT_PROMPT_PATH)
+        extra = github.get_file_content(PROJECT_PROMPT_PATH)
         extra ? "\n\n#{extra}" : ""
       end
 
@@ -121,41 +116,39 @@ module Calvin
         #{project_conventions}
       PROMPT
 
-      Success(prompt: enriched)
+      Success(github: github, issue: issue, prompt: enriched)
     rescue => e
       Failure(step: :enrich_prompt, error: e.message, usage: nil)
     end
 
-    def call_mistral(prompt:)
+    def call_mistral(github:, issue:, prompt:)
       result = MistralClient.new.complete(prompt)
-      @usage = result[:usage]
-      Success(content: result[:content], usage: result[:usage])
+      Success(github: github, issue: issue, content: result[:content], usage: result[:usage])
     rescue => e
       Failure(step: :call_mistral, error: e.message, usage: nil)
     end
 
-    def parse_files(content:, usage:)
+    def parse_files(github:, issue:, content:, usage:)
       files = FileParser.parse(content)
       return Failure(step: :parse_files, error: "nessun FILE: block nella risposta", usage: usage) if files.empty?
       description = FileParser.parse_pr_body(content)
       Calvin::LOG.info "parse_files: #{files.size} file(s) — PR body: #{description ? 'trovato' : 'assente'}"
-      Success(files: files, content: content, usage: usage, description: description)
+      Success(github: github, issue: issue, files: files, content: content, usage: usage, description: description)
     end
 
-    def post_comment(files:, content:, usage:, description:)
-      IssueCommenter.post(issue: @issue, content: content, usage: usage, github: @github)
-      Success(files: files, usage: usage, description: description)
+    def post_comment(github:, issue:, files:, content:, usage:, description:)
+      IssueCommenter.post(issue: issue, content: content, usage: usage, github: github)
+      Success(github: github, issue: issue, files: files, usage: usage, description: description)
     rescue => e
-      # Non bloccante: se il commento fallisce il flow continua
       Calvin::LOG.warn "post_comment FAILED (non bloccante): #{e.message}"
-      Success(files: files, usage: usage, description: description)
+      Success(github: github, issue: issue, files: files, usage: usage, description: description)
     end
 
-    def commit_and_pr(files:, usage:, description:)
+    def commit_and_pr(github:, issue:, files:, usage:, description:)
       CommitAndPr.call(
         files:         files,
-        issue:         @issue,
-        github:        @github,
+        issue:         issue,
+        github:        github,
         branch_prefix: "agent",
         usage:         usage,
         description:   description
