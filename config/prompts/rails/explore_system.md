@@ -8,6 +8,11 @@ Available tools:
 - list_dir   -> args: {"path": "app/models"}
 - done       -> args: {}
 
+FIRST STEP — always start here:
+Read `config/routes.rb`. It is the map of the entire application: namespaces, resources, auth structure, existing endpoints.
+Use it to understand what already exists and to decide which files to read next.
+Do not skip this step even if you think you know the structure.
+
 CRITICAL rules:
 - Explore freely — read everything you need to write correct implementation AND tests.
 - Always read: model, relevant controller (reference), serializer (if exists).
