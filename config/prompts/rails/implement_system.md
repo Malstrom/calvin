@@ -10,20 +10,21 @@ Violations here cause CI failures. Check each rule against every file you produc
 CORRECT: `class AddFoo < ActiveRecord::Migration[8.0]`
 WRONG:   `class AddFoo < ActiveRecord::Migration[7.1]`
 
-**2. Routing inside namespace**
-CORRECT: `namespace :signals { post :preferences, to: 'preferences#create' }`
-WRONG:   `namespace :signals { post :preferences, to: 'signals/preferences#create' }`
-The outer namespace prefix is applied automatically by Rails. Never repeat it in `to:`.
+**2. Routing — append only, never rewrite**
+When modifying `routes.rb`, preserve ALL existing routes. Only add the new block.
+CORRECT: read the current file, add the new namespace/resource block, keep everything else intact
+WRONG:   rewrite routes.rb from scratch with only the new route
 
-**3. Model validations**
+**3. Scope — only touch what the task requires**
+When modifying ANY existing file, preserve ALL content that is unrelated to the task.
+Do not remove, reformat, or rewrite sections you were not asked to change.
+WRONG: removing existing model methods to add a new one
+WRONG: changing quote style or whitespace in files touched for unrelated reasons
+
+**4. Model validations**
 CORRECT: `enum :field, { cool: 0, warm: 1 }`  ← enum only, nothing else
 WRONG:   `validates :field, numericality: { in: 1..5 }`  ← forbidden if a contract rule covers it
 The contract is the single validation source for API inputs.
-
-**4. Naming — use action verbs**
-CORRECT: `SavePreferencesContract`, `UpdateProfileService`
-WRONG:   `UpsertPreferencesContract`, `HandlePreferencesService`
-Never use: Upsert, Handle, Process, Manage.
 
 **5. Controller — never render json: directly**
 CORRECT: `render_success({ preferences: PreferencesSerializer.new(p).serializable_hash })`
@@ -41,14 +42,8 @@ end
 WRONG: `if result.success? ...`
 
 **7. Contract — one rule per field**
-CORRECT:
-```ruby
-rule(preferences: :temperature_preference) do
-  next unless value
-  key.failure('must be cool, warm or no_preference') unless VALID_TEMPERATURE_PREFERENCES.include?(value)
-end
-```
-WRONG: a single `rule(:preferences)` block with multiple `if` statements inside.
+CORRECT: `rule(preferences: :temperature_preference) { next unless value; key.failure("...") unless VALID.include?(value) }`
+WRONG:   a single `rule(:preferences)` block with multiple `if` statements inside.
 
 **8. Tests — monad include**
 Every test class using `assert_pattern { result => Success }` MUST include at the top of the class:
@@ -65,15 +60,15 @@ WRONG:   `class Api::V1::FooControllerTest < ActionDispatch::IntegrationTest`
 CORRECT: `@headers = auth_headers(users(:alice))`
 WRONG:   anything using `.jwt` — that method does not exist.
 
-**11. Fixtures — new columns**
+**11. Tests — do not test models**
+Do not write or modify model test files. Model logic (enums, associations) is covered by contract and service tests.
+WRONG: writing `test/models/foo_test.rb` for a new feature
+
+**12. Fixtures — new columns**
 Every new column requires updating `test/fixtures/<model_plural>.yml`.
 Add the attribute explicitly on every existing row. Never rely on database defaults.
 CORRECT: `temperature_preference: null`  ← explicit null is fine
 WRONG:   column missing from fixture  ← causes silent wrong default
-
-**12. Scope discipline**
-Only modify files the task explicitly requires.
-WRONG: changing quote style, whitespace, or formatting in files touched for unrelated reasons.
 
 ---
 
@@ -94,6 +89,7 @@ Rules:
 - No text between FILE: blocks.
 - Write implementation files first, then test files.
 - Tests are MANDATORY — one test file per new non-test .rb file.
+- Do NOT write test/models/ files.
 - Minimum test coverage:
     - Controller: 401 (no token) + 422 (invalid params) + 200 (happy path)
     - Service/contract: one valid input + one failure per validated field

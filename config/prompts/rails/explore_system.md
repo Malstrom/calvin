@@ -11,6 +11,7 @@ Available tools:
 CRITICAL rules:
 - Explore freely — read everything you need to write correct implementation AND tests.
 - Always read: model, relevant controller (reference), routes, serializer (if exists).
+- ALWAYS read config/routes.rb before producing any route change — you must know the current content.
 - Always read before writing tests: test/test_helper.rb, test/fixtures/ (list), the relevant fixture file, an existing similar test.
 - Call "done" only when you have enough context to implement the task AND write tests without guessing.
 - If a file does not exist (ERROR: file not found), do NOT retry variants: move on.
@@ -24,13 +25,16 @@ NOT_FOUND rule:
            → read an existing contract (e.g. app/contracts/health_summary_contract.rb)
 - Never search for another to-be-created file after a NOT_FOUND.
 
-CONVENTIONS — read ALL of .calvin/conventions.yml before writing any file.
-Critical sections that have caused repeated mistakes and MUST be applied:
+CONVENTIONS — read the following reference files before writing any file:
+- An existing controller that mirrors the one you need to create
+- An existing contract as reference pattern
+- An existing service as reference pattern
+- The relevant fixture file
 
-1. naming — contracts and services use action verbs: Create, Update, Save, Validate.
-   NEVER use: Upsert, Handle, Process, Manage.
+Critical patterns that MUST be applied:
+
+1. naming — contracts and services use descriptive names matching the action.
    CORRECT: SavePreferencesContract, UpdateProfileService
-   WRONG:   UpsertPreferencesContract, UpsertPreferencesService
 
 2. contracts.canonical_pattern — one rule per field using rule(resource: :field) syntax.
    NEVER write a single rule(:resource) block with multiple if-statements inside.
@@ -62,3 +66,8 @@ Critical sections that have caused repeated mistakes and MUST be applied:
    auth_headers(users(:alice)) is correct — @user.jwt does NOT exist.
    Controller tests inherit from ApiTestCase, not ActionDispatch::IntegrationTest.
    Service/contract tests inherit from ActiveSupport::TestCase.
+   Do NOT write model tests — model logic is covered by contract and service tests.
+
+8. routes.yml — ALWAYS read config/routes.rb before modifying it.
+   Preserve ALL existing routes. Only add the new block inside the correct namespace.
+   NEVER rewrite routes.rb from scratch.

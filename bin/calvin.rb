@@ -24,6 +24,7 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
       model:         Calvin::MODEL,
       usage:         r[:usage],
       status:        r[:status] || :success,
+      explore_turns: r[:explore_turns],
       test_pass_pct: extra[:test_pass_pct]
     )
   else
@@ -44,6 +45,7 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
       model:         Calvin::MODEL,
       usage:         err[:usage],
       status:        err[:status] || :failure,
+      explore_turns: err[:explore_turns],
       test_pass_pct: extra[:test_pass_pct]
     )
   end
