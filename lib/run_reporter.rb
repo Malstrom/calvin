@@ -4,9 +4,14 @@
 # Produce due file (append CSV + regen MD) in un unico commit atomico.
 # I prezzi dei token vengono letti da config/pricing.yml — mai hardcodati.
 #
+# Il GitHubClient passato come `github:` ha già il repo_root corretto
+# (es. "backend/api"), quindi i file vengono scritti nel path giusto:
+#   backend/api/.calvin/reports/runs.csv
+#   backend/api/.calvin/reports/runs.md
+#
 # Uso:
 #   Calvin::RunReporter.write(
-#     github:        @github,           # GitHubClient del repo target
+#     github:        @github,           # GitHubClient del repo target (con repo_root)
 #     workflow:      "calvin-auto",     # "calvin-auto" | "calvin-direct" | "calvin-fix"
 #     ref:           issue.number,      # Integer — numero issue o PR
 #     model:         "codestral-latest",
@@ -40,28 +45,27 @@ module Calvin
     }.freeze
 
     def self.write(github:, workflow:, ref:, model:, usage:, status:, test_pass_pct: nil)
-      pricing     = load_pricing
-      prompt_tok  = usage&.fetch("prompt_tokens",     0).to_i
-      compl_tok   = usage&.fetch("completion_tokens", 0).to_i
-      total_tok   = usage&.fetch("total_tokens",      0).to_i
-      cost_usd    = calculate_cost(prompt_tok, compl_tok, model, pricing)
+      pricing    = load_pricing
+      prompt_tok = usage&.fetch("prompt_tokens",     0).to_i
+      compl_tok  = usage&.fetch("completion_tokens", 0).to_i
+      total_tok  = usage&.fetch("total_tokens",      0).to_i
+      cost_usd   = calculate_cost(prompt_tok, compl_tok, model, pricing)
 
       new_row = [
         Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
         workflow,
         ref.to_s,
         model,
-        prompt_tok,
-        compl_tok,
-        total_tok,
-        cost_usd,
+        prompt_tok.to_s,
+        compl_tok.to_s,
+        total_tok.to_s,
+        cost_usd.to_s,
         status.to_s,
-        test_pass_pct.nil? ? "" : test_pass_pct.to_s
+        test_pass_pct.nil? ? nil : test_pass_pct.to_s
       ]
 
-      # Legge il CSV esistente (senza repo_root) oppure parte dall'header vuoto
-      reporter_client = GitHubClient.new(repo_root: "")
-      existing_csv    = reporter_client.get_file_content_raw(CSV_PATH)
+      # Legge CSV esistente tramite il client del caller (repo_root già incluso)
+      existing_csv = github.get_file_content(CSV_PATH)
       rows = if existing_csv
         CSV.parse(existing_csv, headers: true).map(&:fields)
       else
@@ -69,14 +73,14 @@ module Calvin
       end
       rows << new_row
 
-      csv_content = CSV.generate do |csv|
+      csv_content = CSV.generate(force_quotes: false) do |csv|
         csv << CSV_HEADER
         rows.each { |r| csv << r }
       end
 
       md_content = build_md(rows)
 
-      reporter_client.commit_files_atomically(
+      github.commit_files_atomically(
         [
           { path: CSV_PATH, content: csv_content },
           { path: MD_PATH,  content: md_content  }
@@ -112,22 +116,18 @@ module Calvin
     def self.build_md(rows)
       header = "| Date | Workflow | Ref | Model | Prompt tok | Completion tok | Total tok | Cost USD | Status | Test pass % |"
       sep    = "|------|----------|-----|-------|-----------|----------------|-----------|----------|--------|-------------|]"
+      sep    = sep.delete("]")
 
       table_rows = rows.map do |r|
         run_at, workflow, ref, model, pt, ct, tt, cost, status, pct = r
-        date   = run_at.to_s[0..15].tr("T", " ")
-        emoji  = STATUS_EMOJI[status] || "❓"
-        pct_s  = pct.to_s.empty? ? "—" : "#{pct}%"
+        date  = run_at.to_s[0..15].tr("T", " ")
+        emoji = STATUS_EMOJI[status] || "❓"
+        pct_s = pct.to_s.empty? ? "—" : "#{pct}%"
         "| #{date} | #{workflow} | \##{ref} | #{model} | #{format_num(pt)} | #{format_num(ct)} | #{format_num(tt)} | $#{cost} | #{emoji} #{status} | #{pct_s} |"
       end
 
-      <<~MD
-        # Calvin Run Reports
-
-        #{header}
-        #{sep}
-        #{table_rows.join("\n")}
-      MD
+      lines = ["# Calvin Run Reports", "", header, sep] + table_rows + [""]
+      lines.join("\n")
     end
     private_class_method :build_md
 
