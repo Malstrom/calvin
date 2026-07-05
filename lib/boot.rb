@@ -26,6 +26,8 @@ module Calvin
 end
 
 require_relative "github_client"
+require_relative "context_builder"
+require_relative "file_parser"
 require_relative "mistral_client"
 require_relative "commit_and_pr"
 require_relative "explore_flow"
