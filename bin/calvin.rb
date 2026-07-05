@@ -2,14 +2,13 @@
 # Orchestratore Calvin — entry point per GitHub Actions.
 #
 # Routing:
-#   CALVIN_FIX_MODE=true   → CiFixFlow
-#   label calvin-auto      → ExploreFlow  (prompt da commento agent-prompt)
-#   label calvin-auto-body → ExploreFlow  (prompt da title+body)
-#   default                → errore esplicito (calvin-direct rimosso)
+#   CALVIN_FIX_MODE=true → CiFixFlow
+#   label calvin          → ExploreFlow  (prompt da title+body)
+#   default               → errore esplicito
 
 require_relative "../lib/boot"
 
-# ── Post-steps uniformi per tutti i flow ──────────────────────────────────────────
+# ── Post-steps uniformi per tutti i flow ──────────────────────────────────────
 def run_post_steps(result, github:, workflow:, ref:, extra: {})
   if result.success?
     r = result.value!
@@ -50,7 +49,7 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
   end
 end
 
-# ── Fix mode (trigger da workflow ci-fix) ───────────────────────────────────
+# ── Fix mode (trigger da workflow ci-fix) ─────────────────────────────────────
 if ENV["CALVIN_FIX_MODE"] == "true"
   pr_number   = ENV.fetch("PR_NUMBER").to_i
   pr_branch   = ENV.fetch("PR_BRANCH")
@@ -72,7 +71,7 @@ if ENV["CALVIN_FIX_MODE"] == "true"
   exit(result.success? ? 0 : 1)
 end
 
-# ── Fetch issue ──────────────────────────────────────────────────────────────────
+# ── Fetch issue ───────────────────────────────────────────────────────────────
 temp_github = Calvin::GitHubClient.new
 issue       = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
 labels      = issue.labels.map(&:name)
@@ -84,21 +83,20 @@ Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
 github = Calvin::GitHubClient.new(repo_root: repo_root)
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
 
-# ── Auto mode (ExploreFlow) ─────────────────────────────────────────────────────
-if labels.include?("calvin-auto") || labels.include?("calvin-auto-body")
-  workflow = labels.include?("calvin-auto-body") ? "calvin-auto-body" : "calvin-auto"
-  Calvin::LOG.info "mode: #{workflow} (ExploreFlow)"
+# ── Calvin mode (ExploreFlow) ─────────────────────────────────────────────────
+if labels.include?("calvin")
+  Calvin::LOG.info "mode: calvin (ExploreFlow)"
 
   result = Calvin::ExploreFlow.run(github, issue)
   run_post_steps(result,
     github:   github,
-    workflow: workflow,
+    workflow: "calvin",
     ref:      issue.number,
     extra:    { issue: issue }
   )
   exit(result.success? ? 0 : 1)
 end
 
-# ── Nessuna label riconosciuta ───────────────────────────────────────────────────
-Calvin::LOG.error "Nessuna label Calvin riconosciuta su issue ##{issue.number} (labels: #{labels.join(', ')}). Usa calvin-auto o calvin-auto-body."
+# ── Nessuna label riconosciuta ────────────────────────────────────────────────
+Calvin::LOG.error "Nessuna label Calvin riconosciuta su issue ##{issue.number} (labels: #{labels.join(', ')}). Usa la label 'calvin'."
 exit(1)

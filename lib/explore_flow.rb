@@ -1,8 +1,8 @@
 # frozen_string_literal: true
-# Flusso autonomo Calvin (calvin-auto / calvin-auto-body).
+# Flusso Calvin — triggerato dalla label 'calvin'.
 # Pipeline dry-transaction con 4 step espliciti:
 #
-#   build_prompt   — ContextBuilder costruisce il prompt (gestisce label, commenti, fallback)
+#   build_prompt   — ContextBuilder costruisce il prompt dal title+body dell'issue
 #   react_loop     — ReActLoop: il modello esplora e implementa
 #   parse_files    — estrae FILE: blocks e PR_BODY
 #   commit_and_pr  — branch + commit + PR

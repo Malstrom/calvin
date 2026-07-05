@@ -26,11 +26,8 @@ module Calvin
 end
 
 require_relative "github_client"
-require_relative "context_builder"
 require_relative "mistral_client"
-require_relative "file_parser"
 require_relative "commit_and_pr"
-require_relative "implement_flow"
 require_relative "explore_flow"
 require_relative "ci_fix_flow"
 require_relative "run_reporter"
@@ -39,7 +36,6 @@ require_relative "test_output_parser"
 require_relative "issue_commenter"
 require_relative "pr_body_builder"
 require_relative "fix_prompt_builder"
-require_relative "test_context_injector"
 require_relative "react_loop"
 
 module Calvin
