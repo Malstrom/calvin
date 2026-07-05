@@ -18,6 +18,9 @@
 #     usage:         result[:usage],
 #     status:        :success,
 #     explore_turns: result[:explore_turns],
+#     temperature:   result[:temperature],
+#     files_written: result[:files_written],
+#     issue_length:  issue.body.to_s.length,
 #     test_pass_pct: nil
 #   )
 
@@ -33,6 +36,7 @@ module Calvin
       run_at workflow ref model
       prompt_tokens completion_tokens total_tokens
       cost_usd status explore_turns test_pass_pct
+      temperature files_written issue_length
     ].freeze
 
     STATUS_EMOJI = {
@@ -43,7 +47,19 @@ module Calvin
       "unfixable" => "⚠️"
     }.freeze
 
-    def self.write(github:, workflow:, ref:, model:, usage:, status:, explore_turns: nil, test_pass_pct: nil)
+    def self.write(
+      github:,
+      workflow:,
+      ref:,
+      model:,
+      usage:,
+      status:,
+      explore_turns: nil,
+      test_pass_pct: nil,
+      temperature:   nil,
+      files_written: nil,
+      issue_length:  nil
+    )
       pricing    = Calvin::CONFIG.dig(:pricing, :models) || {}
       prompt_tok = usage&.fetch("prompt_tokens",     0).to_i
       compl_tok  = usage&.fetch("completion_tokens", 0).to_i
@@ -61,7 +77,10 @@ module Calvin
         cost_usd.to_s,
         status.to_s,
         explore_turns.nil? ? nil : explore_turns.to_s,
-        test_pass_pct.nil? ? nil : test_pass_pct.to_s
+        test_pass_pct.nil? ? nil : test_pass_pct.to_s,
+        temperature.nil?   ? nil : temperature.to_s,
+        files_written.nil? ? nil : files_written.to_s,
+        issue_length.nil?  ? nil : issue_length.to_s
       ]
 
       existing_csv = github.get_file_content(CSV_PATH)
@@ -105,16 +124,20 @@ module Calvin
     private_class_method :calculate_cost
 
     def self.build_md(rows)
-      header = "| Date | Workflow | Ref | Model | Prompt tok | Completion tok | Total tok | Cost USD | Status | Explore turns | Test pass % |"
-      sep    = "|------|----------|-----|-------|-----------|----------------|-----------|----------|--------|---------------|-------------|"
+      header = "| Date | Workflow | Ref | Model | Prompt tok | Completion tok | Total tok | Cost USD | Status | Explore turns | Test pass % | Temperature | Files written | Issue length |"
+      sep    = "|------|----------|-----|-------|-----------|----------------|-----------|----------|--------|---------------|-------------|-------------|---------------|---------------|"
 
       table_rows = rows.map do |r|
-        run_at, workflow, ref, model, pt, ct, tt, cost, status, explore_turns, pct = r
-        date   = run_at.to_s[0..15].tr("T", " ")
-        emoji  = STATUS_EMOJI[status] || "❓"
-        pct_s  = pct.to_s.empty?           ? "—" : "#{pct}%"
-        turns_s = explore_turns.to_s.empty? ? "—" : explore_turns.to_s
-        "| #{date} | #{workflow} | \##{ref} | #{model} | #{format_num(pt)} | #{format_num(ct)} | #{format_num(tt)} | $#{cost} | #{emoji} #{status} | #{turns_s} | #{pct_s} |"
+        run_at, workflow, ref, model, pt, ct, tt, cost, status,
+          explore_turns, pct, temperature, files_written, issue_length = r
+        date    = run_at.to_s[0..15].tr("T", " ")
+        emoji   = STATUS_EMOJI[status] || "❓"
+        pct_s   = pct.to_s.empty?            ? "—" : "#{pct}%"
+        turns_s = explore_turns.to_s.empty?  ? "—" : explore_turns.to_s
+        temp_s  = temperature.to_s.empty?    ? "—" : temperature.to_s
+        files_s = files_written.to_s.empty?  ? "—" : files_written.to_s
+        ilen_s  = issue_length.to_s.empty?   ? "—" : issue_length.to_s
+        "| #{date} | #{workflow} | \##{ref} | #{model} | #{format_num(pt)} | #{format_num(ct)} | #{format_num(tt)} | $#{cost} | #{emoji} #{status} | #{turns_s} | #{pct_s} | #{temp_s} | #{files_s} | #{ilen_s} |"
       end
 
       lines = ["# Calvin Run Reports", "", header, sep] + table_rows + [""]

@@ -7,6 +7,13 @@ react:
   grace_turns: 2
   not_found_limit: 3
 
+sampling:
+  temperature:
+    explore: 0.1   # ReAct loop — leggera variabilità per tool selection
+    implement: 0.0 # Codegen puro — massima riproducibilità
+    fix: 0.0       # CiFixFlow — deterministico
+  max_tokens: 8192
+
 pricing:
   models:
     codestral-latest:
