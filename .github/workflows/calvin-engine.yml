@@ -1,19 +1,8 @@
-name: Calvin engine
+name: Calvin Engine
 
 on:
-  workflow_call:
-    inputs:
-      issue_number:
-        required: true
-        type: number
-      target_repo:
-        required: true
-        type: string
-    secrets:
-      SYNCA_TOKEN:
-        required: true
-      MISTRAL_API_KEY:
-        required: false
+  issues:
+    types: [labeled]
 
 jobs:
   calvin:
@@ -39,34 +28,34 @@ jobs:
       - name: Checkout calvin
         uses: actions/checkout@v4
         with:
-          repository: Malstrom/calvin
-          token: ${{ secrets.SYNCA_TOKEN }}
           path: calvin
+          token: ${{ secrets.SYNCA_TOKEN }}
 
-      # 2. Clona il repo target
+      # 2. Clona synca (target repo)
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.target_repo }}
-          token: ${{ secrets.SYNCA_TOKEN }}
+          repository: Malstrom/synca
           path: target
+          token: ${{ secrets.SYNCA_TOKEN }}
 
-      # 3. Git identity
-      - name: Configure git identity
-        run: |
-          git config --global user.email "calvin@synca.app"
-          git config --global user.name "Calvin"
-
-      # 4. Ruby + gem di Calvin
-      - uses: ruby/setup-ruby@v1
+      # 3. Ruby per Calvin — versione esplicita, indipendente da synca
+      - name: Set up Ruby for Calvin
+        uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.3'
+          ruby-version: "3.3"
+          bundler-cache: false
 
-      - name: Install Ruby dependencies (calvin)
+      # 4. Installa le gem di Calvin
+      - name: Install Calvin gems
         run: bundle install
         working-directory: calvin/bin
 
-      # 5. Ruby + gem del target (synca Rails app) — con cache
+      # 5. Ruby per synca (target Rails app) — versione da .ruby-version di synca
+      #    bundler-cache: true fa bundle install automaticamente.
+      #    Questo step sovrascrive il Ruby attivo nel PATH, ma Calvin gira
+      #    dopo con bundle exec che usa il suo Gemfile — compatibile finché
+      #    synca e calvin hanno versioni Ruby compatibili.
       - name: Set up Ruby for target repo
         uses: ruby/setup-ruby@v1
         with:
@@ -89,9 +78,7 @@ jobs:
         run: bundle exec ruby $GITHUB_WORKSPACE/calvin/bin/calvin.rb
         working-directory: target
         env:
-          BUNDLE_GEMFILE: ${{ github.workspace }}/calvin/bin/Gemfile
-          ISSUE_NUMBER: ${{ inputs.issue_number }}
-          GITHUB_REPOSITORY: ${{ inputs.target_repo }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
           GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           CALVIN_MODEL: codestral-latest
