@@ -22,17 +22,10 @@ module Calvin
       @client.issue_comments(REPO, issue.number)
     end
 
-    # Aggiorna o crea il commento di stato Calvin sull'issue
-    def post_status(issue, msg)
-      marker   = "<!-- calvin-status -->"
-      body     = "#{marker}\n#{msg}"
-      existing = @client.issue_comments(REPO, issue.number)
-                        .find { |c| c.body.start_with?(marker) }
-      if existing
-        @client.update_comment(REPO, existing.id, body)
-      else
-        @client.add_comment(REPO, issue.number, body)
-      end
+    # Aggiunge un commento su un'issue (o PR, stessa API).
+    # Sostituisce post_status — niente marker, niente upsert.
+    def add_issue_comment(number, body)
+      @client.add_comment(REPO, number, body)
     end
 
     # Posta un commento su una PR (pr_number == issue_number in GitHub)

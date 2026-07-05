@@ -7,28 +7,26 @@
 #   result[:output]   # => String (stdout+stderr combinati)
 #   result[:failures] # => Array<{ test_path:, impl_path:, message: }>
 #
-# rails_root deve essere il path assoluto della dir Rails di synca nel runner
-# (es. workspace_path + "/" + Calvin::REPO_ROOTS["rails"]).
-#
+# rails_root deve essere il path assoluto della dir Rails di synca nel runner.
 # Non lancia eccezioni: qualsiasi errore di sistema imposta success: false.
 
 module Calvin
   class TestRunner
-    # Regex per un blocco failure Minitest:
+    # Cattura sia blocchi Failure: che Error: di Minitest.
+    # Formato Minitest:
     #   Failure:
     #   TestClass#test_method [test/path/to_test.rb:42]:
-    #   Expected ... to ...
+    #   Expected ... / NoMethodError ...
     FAILURE_BLOCK_RE = /
-      ^Failure:\n
+      ^(?:Failure|Error):\n
       (\S+)\#(\S+)\s+\[([^:]+):(\d+)\]:\n
-      (.*?)(?=\n(?:Failure|Error|Error:|\d+ runs)|\z)
+      (.*?)(?=\n(?:Failure|Error):\n|\n\d+\s+runs|\z)
     /mx.freeze
 
     # Convenzione Rails: test/X/foo_test.rb → app/X/foo.rb
-    # Eccezioni note mappate esplicitamente.
     IMPL_PATH_MAP = {
-      "test/contracts" => "app/contracts",
-      "test/services"  => "app/services",
+      "test/contracts"   => "app/contracts",
+      "test/services"    => "app/services",
       "test/controllers" => "app/controllers"
     }.freeze
 
@@ -49,7 +47,7 @@ module Calvin
 
     def run_test_suite
       stdout_stderr = nil
-      status = nil
+      status        = nil
       Dir.chdir(@rails_root) do
         stdout_stderr, status = Open3.capture2e(
           { "RAILS_ENV" => "test" },
@@ -68,11 +66,11 @@ module Calvin
     end
 
     # Deriva l'impl_path dal test_path usando le convenzioni Rails.
-    # Se nessuna convenzione corrisponde, ritorna nil (il prompt builder la gestisce).
+    # Ritorna nil se nessuna convenzione corrisponde — il prompt builder lo gestisce.
     def derive_impl_path(test_path)
       IMPL_PATH_MAP.each do |test_prefix, impl_prefix|
-        if test_path.start_with?(test_prefix + "/")
-          base = test_path.sub(test_prefix + "/", "").sub(/_test\.rb$/, ".rb")
+        if test_path.start_with?("#{test_prefix}/")
+          base = test_path.sub("#{test_prefix}/", "").sub(/_test\.rb$/, ".rb")
           return "#{impl_prefix}/#{base}"
         end
       end
