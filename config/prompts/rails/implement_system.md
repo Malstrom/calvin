@@ -61,30 +61,52 @@ end
 ```
 WRONG: `if result.success? ...`
 
-**7. Tests — monad include**
+**7. Tests — cover every code path**
+Derive test cases directly from the code you wrote. Do not guess or use a fixed list.
+
+For every controller action:
+- One test per `in Success[...]` branch
+- One test per `in Failure[...]` branch
+- One test for 401 if the endpoint requires authentication
+- One test for 422 if the contract can reject input
+
+For every service:
+- One test per `Success(...)` return path
+- One test per `Failure(...)` return path, verifying the exact failure tuple
+
+Missing a branch = missing a test = rule violation.
+
+**8. Tests — monad include**
 Every test class using `assert_pattern { result => Success }` MUST include at the top of the class:
 ```ruby
 include Dry::Monads[:result]
 ```
 Applies to service tests and contract tests. Not needed in controller tests.
 
-**8. Tests — base class**
+**9. Tests — base class**
 CORRECT: `class Api::V1::FooControllerTest < ApiTestCase`
 WRONG:   `class Api::V1::FooControllerTest < ActionDispatch::IntegrationTest`
 
-**9. Tests — auth**
+**10. Tests — auth**
 CORRECT: `@headers = auth_headers(users(:alice))`
 WRONG:   anything using `.jwt` — that method does not exist.
 
-**10. Tests — do not test models**
+**11. Tests — do not test models**
 Do not write or modify model test files. Model logic is covered by contract and service tests.
 WRONG: writing `test/models/foo_test.rb` for a new feature
 
-**11. Fixtures — new columns**
+**12. Fixtures — new columns**
 Every new column requires updating `test/fixtures/<model_plural>.yml`.
-Add the attribute explicitly on every existing row. Never rely on database defaults.
-CORRECT: `temperature_preference: null`  ← explicit null is fine
-WRONG:   column missing from fixture  ← causes silent wrong default
+When modifying a fixture file, copy every existing row exactly as-is and only append the new fields.
+Never change existing field values — not even formatting or quote style.
+CORRECT:
+```yaml
+alice_prefs:
+  user: alice
+  travel_style: 2        # unchanged from original
+  new_column: null       # only this line is added
+```
+WRONG: changing `travel_style: 2` to `travel_style: 1` while adding new columns
 
 ---
 
@@ -106,9 +128,6 @@ Rules:
 - Write implementation files first, then test files.
 - Tests are MANDATORY — one test file per new non-test .rb file.
 - Do NOT write test/models/ files.
-- Minimum test coverage:
-    - Controller: 401 (no token) + 422 (invalid params) + 200 (happy path)
-    - Service/contract: one valid input + one failure per validated field
 
 After all FILE: blocks, write a PR description:
 
