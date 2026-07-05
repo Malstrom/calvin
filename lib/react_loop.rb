@@ -7,11 +7,13 @@
 #     Il modello esplora il repo tramite tool calls JSON.
 #     system: config/prompts/{stack}/explore_system.md
 #     Termina quando il modello chiama done() o si raggiunge MAX_TURNS.
+#     temperature: sampling.temperature.explore (default 0.1)
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
 #     system: config/prompts/{stack}/implement_system.md
 #     user:   prompt issue + observations collassate dall'esplorazione
 #     Il modello scrive i FILE: blocks e il PR_BODY.
+#     temperature: sampling.temperature.implement (default 0.0)
 #
 # Tool disponibili durante l'esplorazione:
 #   read_file(path)  → contenuto file o errore
@@ -24,7 +26,7 @@
 # Stack determinato dalla label dell'issue ("rails" | "flutter").
 # Default: "rails".
 #
-# .run → { content: String, turns: Integer, usage: Hash | nil }
+# .run → { content: String, turns: Integer, usage: Hash | nil, temperature: Float }
 
 require "json"
 require_relative "file_parser"
@@ -45,10 +47,15 @@ module Calvin
       @observations     = []
       @json_failures    = 0
       @not_found_streak = 0
+
+      sampling           = Calvin::CONFIG.dig(:sampling, :temperature) || {}
+      @temp_explore      = sampling[:explore]    || sampling["explore"]    || 0.1
+      @temp_implement    = sampling[:implement]  || sampling["implement"]  || 0.0
+
       setup_messages
     end
 
-    # Ritorna { content: String, turns: Integer, usage: Hash | nil }
+    # Ritorna { content: String, turns: Integer, usage: Hash | nil, temperature: Float }
     def run
       MAX_TURNS.times do |i|
         n      = i + 1
@@ -123,8 +130,8 @@ module Calvin
     end
 
     def call_model
-      raw = @mistral.complete_messages(@messages)[:content]
-      Calvin::LOG.info "ReAct turn: #{raw[0..120]}"
+      raw = @mistral.complete_messages(@messages, temperature: @temp_explore)[:content]
+      Calvin::LOG.info "ReAct turn (temp=#{@temp_explore}): #{raw[0..120]}"
       raw
     end
 
@@ -157,14 +164,17 @@ module Calvin
     # ---------------------------------------------------------------------------
 
     def implement_phase(turns)
-      Calvin::LOG.info "implement_phase after #{turns} explore turn(s)"
+      Calvin::LOG.info "implement_phase after #{turns} explore turn(s) (temp=#{@temp_implement})"
 
-      response = @mistral.complete_messages([
-        { role: "system", content: load_implement_system },
-        { role: "user",   content: build_implement_user }
-      ])
+      response = @mistral.complete_messages(
+        [
+          { role: "system", content: load_implement_system },
+          { role: "user",   content: build_implement_user }
+        ],
+        temperature: @temp_implement
+      )
 
-      { content: response[:content], turns: turns, usage: response[:usage] }
+      { content: response[:content], turns: turns, usage: response[:usage], temperature: @temp_implement }
     end
 
     def build_implement_user
