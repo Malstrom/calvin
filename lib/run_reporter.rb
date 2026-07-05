@@ -11,13 +11,14 @@
 #
 # Uso:
 #   Calvin::RunReporter.write(
-#     github:        @github,           # GitHubClient del repo target (con repo_root)
-#     workflow:      "calvin-auto",     # "calvin-auto" | "calvin-direct" | "calvin-fix"
-#     ref:           issue.number,      # Integer — numero issue o PR
+#     github:        @github,
+#     workflow:      "calvin",
+#     ref:           issue.number,
 #     model:         "codestral-latest",
-#     usage:         result[:usage],    # Hash o nil
-#     status:        :success,          # :success | :failure | :fixed | :unfixable | :error
-#     test_pass_pct: nil                # Float o nil
+#     usage:         result[:usage],
+#     status:        :success,
+#     explore_turns: result[:explore_turns],
+#     test_pass_pct: nil
 #   )
 
 require "csv"
@@ -31,7 +32,7 @@ module Calvin
     CSV_HEADER = %w[
       run_at workflow ref model
       prompt_tokens completion_tokens total_tokens
-      cost_usd status test_pass_pct
+      cost_usd status explore_turns test_pass_pct
     ].freeze
 
     STATUS_EMOJI = {
@@ -42,7 +43,7 @@ module Calvin
       "unfixable" => "⚠️"
     }.freeze
 
-    def self.write(github:, workflow:, ref:, model:, usage:, status:, test_pass_pct: nil)
+    def self.write(github:, workflow:, ref:, model:, usage:, status:, explore_turns: nil, test_pass_pct: nil)
       pricing    = Calvin::CONFIG.dig(:pricing, :models) || {}
       prompt_tok = usage&.fetch("prompt_tokens",     0).to_i
       compl_tok  = usage&.fetch("completion_tokens", 0).to_i
@@ -59,12 +60,13 @@ module Calvin
         total_tok.to_s,
         cost_usd.to_s,
         status.to_s,
+        explore_turns.nil? ? nil : explore_turns.to_s,
         test_pass_pct.nil? ? nil : test_pass_pct.to_s
       ]
 
       existing_csv = github.get_file_content(CSV_PATH)
       rows = if existing_csv
-        CSV.parse(existing_csv, headers: true).map(&:fields)
+        CSV.parse(existing_csv.force_encoding("UTF-8"), headers: true).map(&:fields)
       else
         []
       end
@@ -103,15 +105,16 @@ module Calvin
     private_class_method :calculate_cost
 
     def self.build_md(rows)
-      header = "| Date | Workflow | Ref | Model | Prompt tok | Completion tok | Total tok | Cost USD | Status | Test pass % |"
-      sep    = "|------|----------|-----|-------|-----------|----------------|-----------|----------|--------|-------------|"
+      header = "| Date | Workflow | Ref | Model | Prompt tok | Completion tok | Total tok | Cost USD | Status | Explore turns | Test pass % |"
+      sep    = "|------|----------|-----|-------|-----------|----------------|-----------|----------|--------|---------------|-------------|"
 
       table_rows = rows.map do |r|
-        run_at, workflow, ref, model, pt, ct, tt, cost, status, pct = r
-        date  = run_at.to_s[0..15].tr("T", " ")
-        emoji = STATUS_EMOJI[status] || "❓"
-        pct_s = pct.to_s.empty? ? "—" : "#{pct}%"
-        "| #{date} | #{workflow} | \##{ref} | #{model} | #{format_num(pt)} | #{format_num(ct)} | #{format_num(tt)} | $#{cost} | #{emoji} #{status} | #{pct_s} |"
+        run_at, workflow, ref, model, pt, ct, tt, cost, status, explore_turns, pct = r
+        date   = run_at.to_s[0..15].tr("T", " ")
+        emoji  = STATUS_EMOJI[status] || "❓"
+        pct_s  = pct.to_s.empty?           ? "—" : "#{pct}%"
+        turns_s = explore_turns.to_s.empty? ? "—" : explore_turns.to_s
+        "| #{date} | #{workflow} | \##{ref} | #{model} | #{format_num(pt)} | #{format_num(ct)} | #{format_num(tt)} | $#{cost} | #{emoji} #{status} | #{turns_s} | #{pct_s} |"
       end
 
       lines = ["# Calvin Run Reports", "", header, sep] + table_rows + [""]

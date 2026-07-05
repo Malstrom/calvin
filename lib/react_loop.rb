@@ -1,5 +1,5 @@
 # frozen_string_literal: true
-# Loop ReAct (Reason + Act) per calvin-auto.
+# Loop ReAct (Reason + Act) per Calvin.
 #
 # Due fasi distinte:
 #
@@ -77,28 +77,29 @@ module Calvin
     # ---------------------------------------------------------------------------
 
     def load_explore_system
-      path = File.join(PROMPTS_DIR, @stack, "explore_system.md")
-      content = File.read(path)
+      path    = File.join(PROMPTS_DIR, @stack, "explore_system.md")
+      content = File.read(path, encoding: "UTF-8")
       Calvin::LOG.info "ReActLoop: loaded explore_system for stack=#{@stack} (#{content.bytesize} bytes)"
       content
     rescue Errno::ENOENT
       Calvin::LOG.warn "ReActLoop: explore_system.md not found for stack=#{@stack}, using rails fallback"
-      File.read(File.join(PROMPTS_DIR, "rails", "explore_system.md"))
+      File.read(File.join(PROMPTS_DIR, "rails", "explore_system.md"), encoding: "UTF-8")
     end
 
     def load_response_format
-      path = File.join(PROMPTS_DIR, @stack, "response_format.md")
-      content = File.read(path)
+      path    = File.join(PROMPTS_DIR, @stack, "response_format.md")
+      content = File.read(path, encoding: "UTF-8")
       Calvin::LOG.info "ReActLoop: loaded response_format for stack=#{@stack} (#{content.bytesize} bytes)"
       content
     rescue Errno::ENOENT
       Calvin::LOG.warn "ReActLoop: response_format.md not found for stack=#{@stack}, using rails fallback"
-      File.read(File.join(PROMPTS_DIR, "rails", "response_format.md"))
+      File.read(File.join(PROMPTS_DIR, "rails", "response_format.md"), encoding: "UTF-8")
     end
 
     def load_conventions
-      content = @github.get_file_content(Calvin::CONVENTIONS_PATH)
-      if content
+      raw = @github.get_file_content(Calvin::CONVENTIONS_PATH)
+      if raw
+        content = raw.force_encoding("UTF-8")
         Calvin::LOG.info "load_conventions: loaded #{Calvin::CONVENTIONS_PATH} (#{content.bytesize} bytes)"
         content
       else
@@ -187,7 +188,7 @@ module Calvin
 
     def build_implement_user
       context_block = if @observations.any?
-        lines = @observations.map { |o| "#{o[:label]}:\n#{o[:content]}" }.join("\n\n---\n\n")
+        lines = @observations.map { |o| "#{o[:label]}:\n#{o[:content].force_encoding('UTF-8')}" }.join("\n\n---\n\n")
         "## Context gathered during exploration\n\n#{lines}"
       end
 
@@ -203,7 +204,7 @@ module Calvin
               else tool
               end
 
-      @observations << { label: label, content: observation }
+      @observations << { label: label, content: observation.force_encoding("UTF-8") }
     end
 
     # ---------------------------------------------------------------------------
@@ -212,11 +213,12 @@ module Calvin
 
     TOOLS = {
       "read_file" => ->(github, args) {
-        path = args["path"].to_s.strip
-        github.get_file_content(path) || "ERROR: file not found: #{path}"
+        path    = args["path"].to_s.strip
+        content = github.get_file_content(path)
+        content ? content.force_encoding("UTF-8") : "ERROR: file not found: #{path}"
       },
       "list_dir" => ->(github, args) {
-        path = args["path"].to_s.strip
+        path    = args["path"].to_s.strip
         entries = github.list_directory(path)
         entries.any? ? entries.join("\n") : "ERROR: empty or not found: #{path}"
       }

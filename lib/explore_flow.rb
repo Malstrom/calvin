@@ -11,8 +11,8 @@
 # Default: "rails".
 #
 # Ritorna:
-#   Success({ status: :success, pr_url:, branch:, files:, usage: })
-#   Failure({ step:, error:, usage: })
+#   Success({ status: :success, pr_url:, branch:, files:, usage:, explore_turns: })
+#   Failure({ step:, error:, usage:, explore_turns: })
 
 require "dry/transaction"
 require_relative "context_builder"
@@ -24,7 +24,7 @@ module Calvin
   class ExploreFlow
     include Dry::Transaction
 
-    KNOWN_STACKS = %w[rails flutter].freeze
+    KNOWN_STACKS  = %w[rails flutter].freeze
     DEFAULT_STACK = "rails"
 
     step :build_prompt
@@ -42,7 +42,7 @@ module Calvin
       prompt = ContextBuilder.build(issue, github_client: github)
       Success(github: github, issue: issue, prompt: prompt)
     rescue => e
-      Failure(step: :build_prompt, error: e.message, usage: nil)
+      Failure(step: :build_prompt, error: e.message, usage: nil, explore_turns: nil)
     end
 
     def react_loop(github:, issue:, prompt:)
@@ -50,20 +50,28 @@ module Calvin
       Calvin::LOG.info "ExploreFlow: avvio ReActLoop per issue ##{issue.number} (stack=#{stack})"
       result = ReActLoop.new(github, prompt, stack: stack).run
       Calvin::LOG.info "ReActLoop terminato in #{result[:turns]} turn(s)"
-      Success(github: github, issue: issue, content: result[:content], usage: result[:usage])
+      Success(
+        github:        github,
+        issue:         issue,
+        content:       result[:content],
+        usage:         result[:usage],
+        explore_turns: result[:turns]
+      )
     rescue => e
-      Failure(step: :react_loop, error: e.message, usage: nil)
+      Failure(step: :react_loop, error: e.message, usage: nil, explore_turns: nil)
     end
 
-    def parse_files(github:, issue:, content:, usage:)
+    def parse_files(github:, issue:, content:, usage:, explore_turns:)
       files = FileParser.parse(content)
-      return Failure(step: :parse_files, error: "nessun FILE: block prodotto dal modello", usage: usage) if files.empty?
+      if files.empty?
+        return Failure(step: :parse_files, error: "nessun FILE: block prodotto dal modello", usage: usage, explore_turns: explore_turns)
+      end
       description = FileParser.parse_pr_body(content)
       Calvin::LOG.info "parse_files: #{files.size} file(s) — PR body: #{description ? 'trovato' : 'assente'}"
-      Success(github: github, issue: issue, files: files, usage: usage, description: description)
+      Success(github: github, issue: issue, files: files, usage: usage, description: description, explore_turns: explore_turns)
     end
 
-    def commit_and_pr(github:, issue:, files:, usage:, description:)
+    def commit_and_pr(github:, issue:, files:, usage:, description:, explore_turns:)
       CommitAndPr.call(
         files:         files,
         issue:         issue,
@@ -71,12 +79,10 @@ module Calvin
         branch_prefix: "auto",
         usage:         usage,
         description:   description
-      ).fmap { |r| r.merge(status: :success, usage: usage) }
-       .or { |f| Failure(f.merge(usage: usage)) }
+      ).fmap { |r| r.merge(status: :success, usage: usage, explore_turns: explore_turns) }
+       .or   { |f| Failure(f.merge(usage: usage, explore_turns: explore_turns)) }
     end
 
-    # Legge le label dell'issue e ritorna il primo stack riconosciuto.
-    # Fallback: DEFAULT_STACK.
     def detect_stack(issue)
       labels = Array(issue.labels).map { |l| l.is_a?(String) ? l : l[:name].to_s.downcase }
       KNOWN_STACKS.find { |s| labels.include?(s) } || DEFAULT_STACK
