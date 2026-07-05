@@ -19,20 +19,12 @@
 #   Success({ status: :success, pr_url:, branch:, files:, usage:, explore_turns: })
 #   Failure({ step:, error:, usage:, explore_turns: })
 
-require "dry/transaction"
-require_relative "context_builder"
-require_relative "file_parser"
-require_relative "react_loop"
-require_relative "commit_and_pr"
-require_relative "test_fix_loop"
-require_relative "issue_commenter"
-
 module Calvin
   class ExploreFlow
     include Dry::Transaction
 
-    KNOWN_STACKS  = %w[rails flutter].freeze
-    DEFAULT_STACK = "rails"
+    KNOWN_STACKS       = %w[rails flutter].freeze
+    DEFAULT_STACK      = "rails"
     HUMAN_REVIEW_LABEL = "needs-human-review"
 
     step :build_prompt
@@ -91,7 +83,7 @@ module Calvin
     end
 
     # Esegue il test fix loop se siamo in ambiente Rails CI (CALVIN_RAILS_ROOT impostato).
-    # Inietta labels e commento sull'issue se i test non convergono.
+    # Aggiunge label e commento sull'issue se i test non convergono.
     def test_fix(github:, issue:, mistral:, branch:, files:, usage:, description:, explore_turns:)
       rails_root = ENV["CALVIN_RAILS_ROOT"]
       labels     = []
@@ -108,11 +100,7 @@ module Calvin
 
         unless loop_result[:passed]
           labels = [HUMAN_REVIEW_LABEL]
-          IssueCommenter.post(
-            github:  github,
-            issue:   issue,
-            message: build_failure_comment(loop_result)
-          )
+          github.add_issue_comment(issue.number, build_failure_comment(loop_result))
           Calvin::LOG.warn "TestFixLoop: test non convergono dopo #{loop_result[:attempts]} attempt(s) — label #{HUMAN_REVIEW_LABEL} aggiunta"
         end
       else
@@ -123,7 +111,6 @@ module Calvin
                usage: usage, description: description, explore_turns: explore_turns,
                labels: labels)
     rescue => e
-      # Il test loop non deve bloccare la PR — logga e vai avanti
       Calvin::LOG.warn "test_fix step error: #{e.class} — #{e.message}"
       Success(github: github, issue: issue, branch: branch, files: files,
                usage: usage, description: description, explore_turns: explore_turns,
