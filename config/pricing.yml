@@ -1,3 +1,0 @@
-# DEPRECATED: i prezzi sono stati migrati in config/calvin.yml sotto la chiave `pricing:`.
-# Questo file verrà rimosso nella prossima PR di cleanup.
-# Non aggiungere nuovi modelli qui.

@@ -31,6 +31,10 @@ module Calvin
     symbolize_names: true
   ).freeze
 
+  # Path del file convenzioni nel repo target.
+  # Usato da ReActLoop (fase implement) e ImplementFlow.
+  CONVENTIONS_PATH = ".calvin/conventions.md"
+
   REPO  = ENV.fetch("GITHUB_REPOSITORY")
   MODEL = ENV.fetch("CALVIN_MODEL", "codestral-latest")
   LOG   = Logger.new($stdout).tap do |l|

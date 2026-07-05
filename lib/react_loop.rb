@@ -9,7 +9,7 @@
 #     Termina quando il modello chiama done() o si raggiunge MAX_TURNS.
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
-#     system: .calvin/conventions.md dal repo target + response_format.md
+#     system: Calvin::CONVENTIONS_PATH dal repo target + response_format.md
 #     user:   prompt issue + observations collassate dall'esplorazione
 #     Il modello scrive i FILE: blocks e il PR_BODY.
 #
@@ -35,7 +35,6 @@ module Calvin
     GRACE_TURNS     = Calvin::CONFIG.dig(:react, :grace_turns)     || 2
     NOT_FOUND_LIMIT = Calvin::CONFIG.dig(:react, :not_found_limit) || 3
 
-    CONVENTIONS_PATH     = ".calvin/conventions.md"
     FALLBACK_CONVENTIONS = "You are a senior Rails developer. Follow the project conventions you have read during exploration."
 
     PROMPTS_DIR = File.expand_path("../../config/prompts", __FILE__)
@@ -45,13 +44,10 @@ module Calvin
       @issue_prompt = issue_prompt
       @stack        = stack
       @mistral      = MistralClient.new
-      @messages     = [
-        { role: "system", content: load_explore_system },
-        { role: "user",   content: issue_prompt }
-      ]
       @observations     = []
       @json_failures    = 0
       @not_found_streak = 0
+      setup_messages
     end
 
     # Ritorna { content: String, turns: Integer, usage: Hash | nil }
@@ -68,6 +64,13 @@ module Calvin
     end
 
     private
+
+    def setup_messages
+      @messages = [
+        { role: "system", content: load_explore_system },
+        { role: "user",   content: @issue_prompt }
+      ]
+    end
 
     # ---------------------------------------------------------------------------
     # Prompt loading
@@ -94,12 +97,12 @@ module Calvin
     end
 
     def load_conventions
-      content = @github.get_file_content(CONVENTIONS_PATH)
+      content = @github.get_file_content(Calvin::CONVENTIONS_PATH)
       if content
-        Calvin::LOG.info "load_conventions: loaded #{CONVENTIONS_PATH} (#{content.bytesize} bytes)"
+        Calvin::LOG.info "load_conventions: loaded #{Calvin::CONVENTIONS_PATH} (#{content.bytesize} bytes)"
         content
       else
-        Calvin::LOG.warn "load_conventions: #{CONVENTIONS_PATH} not found — using fallback"
+        Calvin::LOG.warn "load_conventions: #{Calvin::CONVENTIONS_PATH} not found — using fallback"
         FALLBACK_CONVENTIONS
       end
     end
@@ -108,11 +111,6 @@ module Calvin
     # Explore loop
     # ---------------------------------------------------------------------------
 
-    # Esegue un singolo turn di esplorazione.
-    # Ritorna:
-    #   :done     — il modello ha chiamato done(), avvia implement_phase
-    #   :abort    — troppi JSON parse failure, interrompi il loop
-    #   :continue — appendi observation e prosegui
     def process_turn(n)
       raw    = call_model
       action = parse_action(raw)
