@@ -5,11 +5,11 @@
 #
 #   FASE 1 — EXPLORE (multi-turn)
 #     Il modello esplora il repo tramite tool calls JSON.
-#     system: EXPLORE_SYSTEM (regole tool + ordine esplorazione, solo JSON)
+#     system: config/prompts/{stack}/explore_system.md
 #     Termina quando il modello chiama done() o si raggiunge MAX_TURNS.
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
-#     system: contenuto di .calvin/prompt dal repo target + RESPONSE_FORMAT
+#     system: .calvin/conventions.md dal repo target + response_format.md
 #     user:   prompt issue + observations collassate dall'esplorazione
 #     Il modello scrive i FILE: blocks e il PR_BODY.
 #
@@ -20,6 +20,9 @@
 #
 # Formato risposta modello durante esplorazione (sempre JSON su una riga):
 #   {"thought": "...", "tool": "...", "args": {...}}
+#
+# Stack determinato dalla label dell'issue ("rails" | "flutter").
+# Default: "rails".
 #
 # .run → { content: String, turns: Integer, usage: Hash | nil }
 
@@ -32,91 +35,18 @@ module Calvin
     GRACE_TURNS     = Calvin::CONFIG.dig(:react, :grace_turns)     || 2
     NOT_FOUND_LIMIT = Calvin::CONFIG.dig(:react, :not_found_limit) || 3
 
-    CALVIN_PROMPT_PATH   = ".calvin/prompt"
+    CONVENTIONS_PATH     = ".calvin/conventions.md"
     FALLBACK_CONVENTIONS = "You are a senior Rails developer. Follow the project conventions you have read during exploration."
 
-    # System message fase 1: solo regole esplorazione e tool grammar.
-    # Niente Ruby, niente formato output — il modello è in "explorer mode".
-    EXPLORE_SYSTEM = <<~PROMPT.freeze
-      You are a senior Rails developer exploring a codebase to gather context for a task.
+    PROMPTS_DIR = File.expand_path("../../config/prompts", __FILE__)
 
-      Always respond with valid JSON on a single line:
-      {"thought": "...", "tool": "...", "args": {...}}
-
-      Available tools:
-      - read_file  -> args: {"path": "app/services/foo.rb"}
-      - list_dir   -> args: {"path": "app/models"}
-      - done       -> args: {}
-
-      CRITICAL rules:
-      - Call "done" as soon as you have read the main files (model, reference controller, serializer, routes).
-      - Do NOT look for test files before calling done — test exploration happens after done.
-      - If a file does not exist (ERROR: file not found), do NOT retry variants: move on or call "done".
-      - Maximum 3 consecutive NOT_FOUND errors before calling "done".
-      - No questions. JSON only.
-
-      ===== TEST EXPLORATION (after done, before writing tests) =====
-      Before writing any test, explore ALWAYS in this order:
-      1. .calvin/testing.yml       — conventions, base classes (ApiTestCase), available helpers
-                                     (auth_headers, post_json, put_json), fixture catalogue,
-                                     forbidden patterns (e.g. user.jwt does not exist)
-      2. test/test_helper.rb       — real definition of ApiTestCase and helpers
-      3. test/fixtures/            — list existing fixtures
-      4. the relevant fixture file — to know which records are available
-      5. an existing similar test  — to learn style and reuse helpers
-      Reuse existing helpers and fixture rows. Create new ones only if they do not exist.
-      NEVER use user.jwt or users(:name).jwt — it does not exist. Always use auth_headers(users(:name)).
-    PROMPT
-
-    # Formato output: definito una sola volta, usato solo nella fase implement.
-    RESPONSE_FORMAT = <<~FORMAT.freeze
-      ## Output format
-
-      For every file to create or modify, output a FILE: block:
-
-      FILE: path/to/file.rb
-      ```ruby
-      # complete file content
-      ```
-
-      Rules:
-      - One FILE: block per file.
-      - New files: full content from scratch.
-      - Modified files: complete updated file, not a diff.
-      - Use the correct language fence (ruby, yml, sql, etc.).
-      - No text between FILE: blocks.
-      - Write implementation files first, then test files.
-      - Tests are MANDATORY — one test file per new non-test .rb file.
-      - Minimum test coverage:
-          - Controller: 401 (no token) + 422 (invalid params) + 200 (happy path)
-          - Service/contract: one valid input + one failure per validated field
-
-      After all FILE: blocks, write a PR description:
-
-      PR_BODY_START
-      ## What this does
-      - <concise bullet>
-
-      ## Decisions made
-      - <decision and why — be specific, reference actual class/field names>
-
-      ## Alternatives rejected
-      - <alternative> — <why rejected>
-
-      ## Risks
-      - Product: <risk or "none">
-      - Technical: <risk or "none">
-      PR_BODY_END
-
-      Always include PR_BODY_START/PR_BODY_END. Never leave placeholder text in the output.
-    FORMAT
-
-    def initialize(github, issue_prompt)
-      @github           = github
-      @issue_prompt     = issue_prompt
-      @mistral          = MistralClient.new
-      @messages         = [
-        { role: "system", content: EXPLORE_SYSTEM },
+    def initialize(github, issue_prompt, stack: "rails")
+      @github       = github
+      @issue_prompt = issue_prompt
+      @stack        = stack
+      @mistral      = MistralClient.new
+      @messages     = [
+        { role: "system", content: load_explore_system },
         { role: "user",   content: issue_prompt }
       ]
       @observations     = []
@@ -138,6 +68,45 @@ module Calvin
     end
 
     private
+
+    # ---------------------------------------------------------------------------
+    # Prompt loading
+    # ---------------------------------------------------------------------------
+
+    def load_explore_system
+      path = File.join(PROMPTS_DIR, @stack, "explore_system.md")
+      content = File.read(path)
+      Calvin::LOG.info "ReActLoop: loaded explore_system for stack=#{@stack} (#{content.bytesize} bytes)"
+      content
+    rescue Errno::ENOENT
+      Calvin::LOG.warn "ReActLoop: explore_system.md not found for stack=#{@stack}, using rails fallback"
+      File.read(File.join(PROMPTS_DIR, "rails", "explore_system.md"))
+    end
+
+    def load_response_format
+      path = File.join(PROMPTS_DIR, @stack, "response_format.md")
+      content = File.read(path)
+      Calvin::LOG.info "ReActLoop: loaded response_format for stack=#{@stack} (#{content.bytesize} bytes)"
+      content
+    rescue Errno::ENOENT
+      Calvin::LOG.warn "ReActLoop: response_format.md not found for stack=#{@stack}, using rails fallback"
+      File.read(File.join(PROMPTS_DIR, "rails", "response_format.md"))
+    end
+
+    def load_conventions
+      content = @github.get_file_content(CONVENTIONS_PATH)
+      if content
+        Calvin::LOG.info "load_conventions: loaded #{CONVENTIONS_PATH} (#{content.bytesize} bytes)"
+        content
+      else
+        Calvin::LOG.warn "load_conventions: #{CONVENTIONS_PATH} not found — using fallback"
+        FALLBACK_CONVENTIONS
+      end
+    end
+
+    # ---------------------------------------------------------------------------
+    # Explore loop
+    # ---------------------------------------------------------------------------
 
     # Esegue un singolo turn di esplorazione.
     # Ritorna:
@@ -180,7 +149,6 @@ module Calvin
       @json_failures >= GRACE_TURNS ? :abort : :continue
     end
 
-    # Ritorna :done se raggiunti NOT_FOUND_LIMIT consecutivi, altrimenti :continue.
     def handle_not_found(observation, n)
       if observation.start_with?("ERROR:")
         @not_found_streak += 1
@@ -207,7 +175,8 @@ module Calvin
       Calvin::LOG.info "implement_phase after #{turns} explore turn(s)"
 
       conventions      = load_conventions
-      implement_system = "#{conventions}\n\n#{RESPONSE_FORMAT}"
+      response_format  = load_response_format
+      implement_system = "#{conventions}\n\n#{response_format}"
       implement_user   = build_implement_user
 
       response = @mistral.complete_messages([
@@ -216,17 +185,6 @@ module Calvin
       ])
 
       { content: response[:content], turns: turns, usage: response[:usage] }
-    end
-
-    def load_conventions
-      content = @github.get_file_content(CALVIN_PROMPT_PATH)
-      if content
-        Calvin::LOG.info "load_conventions: loaded #{CALVIN_PROMPT_PATH} (#{content.bytesize} bytes)"
-        content
-      else
-        Calvin::LOG.warn "load_conventions: #{CALVIN_PROMPT_PATH} not found — using fallback"
-        FALLBACK_CONVENTIONS
-      end
     end
 
     def build_implement_user
