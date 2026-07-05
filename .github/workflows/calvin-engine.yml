@@ -9,10 +9,6 @@ on:
       target_repo:
         required: true
         type: string
-      auto_mode:
-        required: false
-        type: boolean
-        default: false
     secrets:
       SYNCA_TOKEN:
         required: true
@@ -65,4 +61,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           CALVIN_MODEL: codestral-latest
-          CALVIN_AUTO_MODE: ${{ inputs.auto_mode }}
