@@ -28,9 +28,9 @@ require_relative "file_parser"
 
 module Calvin
   class ReActLoop
-    MAX_TURNS       = 30
-    GRACE_TURNS     = 2
-    NOT_FOUND_LIMIT = 3
+    MAX_TURNS       = Calvin::CONFIG.dig(:react, :max_turns)       || 30
+    GRACE_TURNS     = Calvin::CONFIG.dig(:react, :grace_turns)     || 2
+    NOT_FOUND_LIMIT = Calvin::CONFIG.dig(:react, :not_found_limit) || 3
 
     CALVIN_PROMPT_PATH   = ".calvin/prompt"
     FALLBACK_CONVENTIONS = "You are a senior Rails developer. Follow the project conventions you have read during exploration."
@@ -127,7 +127,7 @@ module Calvin
     # Ritorna { content: String, turns: Integer, usage: Hash | nil }
     def run
       MAX_TURNS.times do |i|
-        n = i + 1
+        n      = i + 1
         result = process_turn(n)
         return implement_phase(n) if result == :done
         break                     if result == :abort
@@ -141,24 +141,23 @@ module Calvin
 
     # Esegue un singolo turn di esplorazione.
     # Ritorna:
-    #   :done  — il modello ha chiamato done(), avvia implement_phase
-    #   :abort — troppi JSON parse failure, interrompi il loop
+    #   :done     — il modello ha chiamato done(), avvia implement_phase
+    #   :abort    — troppi JSON parse failure, interrompi il loop
     #   :continue — appendi observation e prosegui
     def process_turn(n)
       raw    = call_model
       action = parse_action(raw)
 
-      if action.nil?
-        return handle_json_failure(n)
-      end
+      return handle_json_failure(n) if action.nil?
 
       @json_failures = 0
       tool = action["tool"]
       args = action["args"] || {}
 
-      return :done if tool == "done".tap {
+      if tool == "done"
         Calvin::LOG.info "ReAct explore done after #{n} turn(s)"
-      }
+        return :done
+      end
 
       observation = dispatch_tool(tool, args)
       Calvin::LOG.info "observation (#{tool}): #{observation[0..80]}"
