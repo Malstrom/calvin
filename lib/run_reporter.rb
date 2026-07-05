@@ -93,7 +93,10 @@ module Calvin
 
       csv_content = CSV.generate(force_quotes: false) do |csv|
         csv << CSV_HEADER
-        rows.each { |r| csv << r }
+        # Normalise every row to CSV_HEADER.size columns so that rows written
+        # before new columns were added are padded with nil rather than left
+        # short, which would produce a jagged CSV unreadable by strict parsers.
+        rows.each { |r| csv << r.fill(nil, r.size...CSV_HEADER.size) }
       end
 
       md_content = build_md(rows)
@@ -128,6 +131,8 @@ module Calvin
       sep    = "|------|----------|-----|-------|-----------|----------------|-----------|----------|--------|---------------|-------------|-------------|---------------|---------------|"
 
       table_rows = rows.map do |r|
+        # Pad to full width before destructuring so old short rows don't raise
+        r = r.fill(nil, r.size...CSV_HEADER.size)
         run_at, workflow, ref, model, pt, ct, tt, cost, status,
           explore_turns, pct, temperature, files_written, issue_length = r
         date    = run_at.to_s[0..15].tr("T", " ")
