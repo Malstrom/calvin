@@ -6,6 +6,7 @@ require "dry/monads"
 require "octokit"
 require "base64"
 require "logger"
+require "yaml"
 
 require_relative "github_client"
 require_relative "context_builder"
@@ -25,6 +26,15 @@ require_relative "test_context_injector"
 require_relative "react_loop"
 
 module Calvin
+  CONFIG = YAML.safe_load_file(
+    File.expand_path("../../config/calvin.yml", __FILE__),
+    symbolize_names: true
+  ).freeze
+
+  # Path del file convenzioni nel repo target.
+  # Usato da ReActLoop (fase implement) e ImplementFlow.
+  CONVENTIONS_PATH = ".calvin/conventions.md"
+
   REPO  = ENV.fetch("GITHUB_REPOSITORY")
   MODEL = ENV.fetch("CALVIN_MODEL", "codestral-latest")
   LOG   = Logger.new($stdout).tap do |l|

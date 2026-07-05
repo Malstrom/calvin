@@ -2,7 +2,7 @@
 # Scrive le statistiche di ogni run Calvin in .calvin/reports/ nel repo target.
 #
 # Produce due file (append CSV + regen MD) in un unico commit atomico.
-# I prezzi dei token vengono letti da config/pricing.yml — mai hardcodati.
+# I prezzi dei token vengono letti da Calvin::CONFIG — mai hardcodati.
 #
 # Il GitHubClient passato come `github:` ha già il repo_root corretto
 # (es. "backend/api"), quindi i file vengono scritti nel path giusto:
@@ -20,15 +20,13 @@
 #     test_pass_pct: nil                # Float o nil
 #   )
 
-require "yaml"
 require "csv"
 
 module Calvin
   module RunReporter
-    REPORTS_DIR  = ".calvin/reports"
-    CSV_PATH     = "#{REPORTS_DIR}/runs.csv"
-    MD_PATH      = "#{REPORTS_DIR}/runs.md"
-    PRICING_PATH = File.expand_path("../../config/pricing.yml", __FILE__)
+    REPORTS_DIR = ".calvin/reports"
+    CSV_PATH    = "#{REPORTS_DIR}/runs.csv"
+    MD_PATH     = "#{REPORTS_DIR}/runs.md"
 
     CSV_HEADER = %w[
       run_at workflow ref model
@@ -45,7 +43,7 @@ module Calvin
     }.freeze
 
     def self.write(github:, workflow:, ref:, model:, usage:, status:, test_pass_pct: nil)
-      pricing    = load_pricing
+      pricing    = Calvin::CONFIG.dig(:pricing, :models) || {}
       prompt_tok = usage&.fetch("prompt_tokens",     0).to_i
       compl_tok  = usage&.fetch("completion_tokens", 0).to_i
       total_tok  = usage&.fetch("total_tokens",      0).to_i
@@ -95,18 +93,10 @@ module Calvin
 
     # ── private ────────────────────────────────────────────────────────────────
 
-    def self.load_pricing
-      YAML.load_file(PRICING_PATH).fetch("models", {})
-    rescue => e
-      Calvin::LOG.warn "RunReporter: pricing.yml non leggibile — #{e.message}"
-      {}
-    end
-    private_class_method :load_pricing
-
     def self.calculate_cost(prompt_tok, compl_tok, model, pricing)
-      p = pricing[model] || {}
-      input_price  = p["input_per_million"].to_f
-      output_price = p["output_per_million"].to_f
+      p            = pricing[model.to_sym] || pricing[model] || {}
+      input_price  = p[:input_per_million].to_f
+      output_price = p[:output_per_million].to_f
       ((prompt_tok / 1_000_000.0) * input_price +
        (compl_tok  / 1_000_000.0) * output_price).round(6)
     end

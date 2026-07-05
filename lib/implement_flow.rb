@@ -24,8 +24,7 @@ module Calvin
   class ImplementFlow
     include Dry::Transaction
 
-    FILE_LIST_PATTERN   = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
-    PROJECT_PROMPT_PATH = ".calvin/prompt"
+    FILE_LIST_PATTERN = /^-\s+(.+?)\s+[—-]+\s+(new|modified)$/i
 
     step :build_prompt
     step :enrich_prompt
@@ -69,7 +68,7 @@ module Calvin
       end
 
       project_conventions = begin
-        extra = github.get_file_content(PROJECT_PROMPT_PATH)
+        extra = github.get_file_content(Calvin::CONVENTIONS_PATH)
         extra ? "\n\n#{extra}" : ""
       end
 

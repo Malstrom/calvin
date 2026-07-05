@@ -1,21 +1,28 @@
 # frozen_string_literal: true
 # Loop ReAct (Reason + Act) per calvin-auto.
 #
-# Il modello esplora il repo autonomamente tramite tool calls JSON,
-# poi segnala "done" quando ha abbastanza contesto per implementare.
+# Due fasi distinte:
 #
-# Tool disponibili:
+#   FASE 1 — EXPLORE (multi-turn)
+#     Il modello esplora il repo tramite tool calls JSON.
+#     system: config/prompts/{stack}/explore_system.md
+#     Termina quando il modello chiama done() o si raggiunge MAX_TURNS.
+#
+#   FASE 2 — IMPLEMENT (singola chiamata separata)
+#     system: Calvin::CONVENTIONS_PATH dal repo target + response_format.md
+#     user:   prompt issue + observations collassate dall'esplorazione
+#     Il modello scrive i FILE: blocks e il PR_BODY.
+#
+# Tool disponibili durante l'esplorazione:
 #   read_file(path)  → contenuto file o errore
-#   list_dir(path)   → lista nomi nel directory
-#   done()           → termina il loop; risposta con FILE: blocks
+#   list_dir(path)   → lista nomi nella directory
+#   done()           → termina l'esplorazione e avvia implement_phase
 #
-# Formato risposta del modello (sempre JSON su una riga):
+# Formato risposta modello durante esplorazione (sempre JSON su una riga):
 #   {"thought": "...", "tool": "...", "args": {...}}
 #
-# Dopo "done" il modello scrive immediatamente i FILE: blocks.
-#
-# Fallback su MAX_TURNS: forza una chiamata finale chiedendo esplicitamente
-# di implementare con il contesto già raccolto.
+# Stack determinato dalla label dell'issue ("rails" | "flutter").
+# Default: "rails".
 #
 # .run → { content: String, turns: Integer, usage: Hash | nil }
 
@@ -24,175 +31,202 @@ require_relative "file_parser"
 
 module Calvin
   class ReActLoop
-    MAX_TURNS       = 30
-    GRACE_TURNS     = 2
-    NOT_FOUND_LIMIT = 3
+    MAX_TURNS       = Calvin::CONFIG.dig(:react, :max_turns)       || 30
+    GRACE_TURNS     = Calvin::CONFIG.dig(:react, :grace_turns)     || 2
+    NOT_FOUND_LIMIT = Calvin::CONFIG.dig(:react, :not_found_limit) || 3
 
-    SYSTEM_PROMPT = <<~PROMPT.freeze
-      Sei un senior Rails developer che esplora un codebase per implementare un task.
+    FALLBACK_CONVENTIONS = "You are a senior Rails developer. Follow the project conventions you have read during exploration."
 
-      Rispondi SEMPRE con JSON valido su una riga:
-      {"thought": "...", "tool": "...", "args": {...}}
+    PROMPTS_DIR = File.expand_path("../../config/prompts", __FILE__)
 
-      Tool disponibili:
-      - read_file  -> args: {"path": "app/services/foo.rb"}
-      - list_dir   -> args: {"path": "app/models"}
-      - done       -> args: {}
-
-      Regole CRITICHE:
-      - Chiama "done" non appena hai letto i file principali (modello, controller di riferimento, serializer, routes).
-      - NON cercare file di test prima di implementare.
-      - Se un file non esiste (ERROR: file non trovato), NON riprovare varianti: vai avanti o chiama "done".
-      - Massimo 3 errori NOT_FOUND consecutivi prima di chiamare "done".
-      - Non fare domande. Solo JSON.
-
-      ===== ESPLORAZIONE TEST =====
-      Prima di scrivere i test, esplora SEMPRE in questo ordine:
-      1. .calvin/testing.yml       — convenzioni, classi base (ApiTestCase), helper disponibili
-                                     (auth_headers, post_json, put_json), fixture catalogue,
-                                     pattern proibiti (es. user.jwt non esiste)
-      2. test/test_helper.rb       — definizione reale di ApiTestCase e degli helper
-      3. test/fixtures/            — lista fixture esistenti
-      4. il file fixture rilevante — per conoscere i record disponibili
-      5. un test simile esistente  — per capire lo stile e riusare helper
-      Riusa helper e fixture esistenti. Crea nuovi helper/fixture solo se non esistono.
-      MAI usare user.jwt o users(:name).jwt — non esiste. Usa sempre auth_headers(users(:name)).
-
-      ===== OUTPUT DOPO "done" =====
-      Scrivi i FILE: blocks in quest'ordine:
-      1. File di implementazione (migration, model, contract, service, serializer, controller)
-      2. File di test (OBBLIGATORI — uno per ogni file .rb nuovo non di test)
-
-      Formato:
-      FILE: path/to/file.rb
-      ```ruby
-      # contenuto completo
-      ```
-
-      Test — copertura minima:
-      - Almeno un happy path + un error/edge path per ogni metodo pubblico
-      - Controller: sempre 401 (no token) + 422 (params invalidi) + 200 (happy path)
-      - I test NON sono opzionali.
-    PROMPT
-
-    FORCE_IMPLEMENT_MSG = <<~MSG.freeze
-      Hai esplorato abbastanza il codebase. Ora implementa il task.
-      Scrivi SUBITO i FILE: blocks in quest'ordine:
-      1. File di implementazione (migration, model, contract, service, serializer, controller)
-      2. File di test (OBBLIGATORI — uno per ogni file .rb nuovo non di test,
-         usa le fixture e gli helper che hai letto in .calvin/testing.yml e test/test_helper.rb)
-      Non esplorare altro. Non fare domande.
-
-      Dopo tutti i FILE: blocks, scrivi obbligatoriamente una descrizione PR in questo formato:
-
-      PR_BODY_START
-      ## What this does
-      - <bullet conciso su cosa implementa questa PR>
-
-      ## Decisions made
-      - <decisione presa e perché — sii specifico, non generico>
-
-      ## Alternatives rejected
-      - <approccio alternativo> — <perché non scelto>
-
-      ## Risks
-      - Product: <rischio o "none">
-      - Technical: <rischio o "none">
-      PR_BODY_END
-
-      Regole per PR_BODY_START/PR_BODY_END:
-      - Includilo sempre, anche se alcune sezioni sono brevi.
-      - Sii specifico: cita nomi di classi, campi o decisioni reali dell'implementazione.
-      - Non lasciare testo placeholder come "<rischio>" nell'output.
-    MSG
-
-    def initialize(github, issue_prompt)
-      @github           = github
-      @issue_prompt     = issue_prompt
-      @mistral          = MistralClient.new
-      @messages         = [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user",   content: issue_prompt }
-      ]
+    def initialize(github, issue_prompt, stack: "rails")
+      @github       = github
+      @issue_prompt = issue_prompt
+      @stack        = stack
+      @mistral      = MistralClient.new
+      @observations     = []
       @json_failures    = 0
       @not_found_streak = 0
+      setup_messages
     end
 
     # Ritorna { content: String, turns: Integer, usage: Hash | nil }
     def run
-      turns = 0
-
-      MAX_TURNS.times do
-        turns += 1
-        raw   = @mistral.complete_messages(@messages)[:content]
-        Calvin::LOG.info "ReAct turn #{turns}: #{raw[0..120]}"
-
-        action = parse_action(raw)
-
-        if action.nil?
-          @json_failures += 1
-          Calvin::LOG.warn "JSON parse fallito (#{@json_failures}/#{GRACE_TURNS})"
-          break if @json_failures >= GRACE_TURNS
-          next
-        end
-
-        @json_failures = 0
-        tool = action["tool"]
-        args = action["args"] || {}
-
-        if tool == "done"
-          Calvin::LOG.info "ReAct done dopo #{turns} turn(s)"
-          return force_implement(turns)
-        end
-
-        observation = dispatch_tool(tool, args)
-        Calvin::LOG.info "observation (#{tool}): #{observation[0..80]}"
-
-        if observation.start_with?("ERROR: file non trovato")
-          @not_found_streak += 1
-          if @not_found_streak >= NOT_FOUND_LIMIT
-            Calvin::LOG.warn "#{NOT_FOUND_LIMIT} NOT_FOUND consecutivi — forzo implementazione"
-            return force_implement(turns)
-          end
-        else
-          @not_found_streak = 0
-        end
-
-        @messages << { role: "assistant", content: raw }
-        @messages << { role: "user",      content: "Observation: #{observation}" }
+      MAX_TURNS.times do |i|
+        n      = i + 1
+        result = process_turn(n)
+        return implement_phase(n) if result == :done
+        break                     if result == :abort
       end
 
-      Calvin::LOG.warn "ReAct MAX_TURNS (#{MAX_TURNS}) esaurite — forzo implementazione"
-      force_implement(MAX_TURNS)
+      Calvin::LOG.warn "ReAct MAX_TURNS (#{MAX_TURNS}) reached — forcing implement"
+      implement_phase(MAX_TURNS)
     end
 
     private
 
-    def force_implement(turns)
-      Calvin::LOG.info "force_implement dopo #{turns} turn(s)"
-      response = @mistral.complete_messages(
-        @messages + [{ role: "user", content: FORCE_IMPLEMENT_MSG }]
-      )
+    def setup_messages
+      @messages = [
+        { role: "system", content: load_explore_system },
+        { role: "user",   content: @issue_prompt }
+      ]
+    end
+
+    # ---------------------------------------------------------------------------
+    # Prompt loading
+    # ---------------------------------------------------------------------------
+
+    def load_explore_system
+      path = File.join(PROMPTS_DIR, @stack, "explore_system.md")
+      content = File.read(path)
+      Calvin::LOG.info "ReActLoop: loaded explore_system for stack=#{@stack} (#{content.bytesize} bytes)"
+      content
+    rescue Errno::ENOENT
+      Calvin::LOG.warn "ReActLoop: explore_system.md not found for stack=#{@stack}, using rails fallback"
+      File.read(File.join(PROMPTS_DIR, "rails", "explore_system.md"))
+    end
+
+    def load_response_format
+      path = File.join(PROMPTS_DIR, @stack, "response_format.md")
+      content = File.read(path)
+      Calvin::LOG.info "ReActLoop: loaded response_format for stack=#{@stack} (#{content.bytesize} bytes)"
+      content
+    rescue Errno::ENOENT
+      Calvin::LOG.warn "ReActLoop: response_format.md not found for stack=#{@stack}, using rails fallback"
+      File.read(File.join(PROMPTS_DIR, "rails", "response_format.md"))
+    end
+
+    def load_conventions
+      content = @github.get_file_content(Calvin::CONVENTIONS_PATH)
+      if content
+        Calvin::LOG.info "load_conventions: loaded #{Calvin::CONVENTIONS_PATH} (#{content.bytesize} bytes)"
+        content
+      else
+        Calvin::LOG.warn "load_conventions: #{Calvin::CONVENTIONS_PATH} not found — using fallback"
+        FALLBACK_CONVENTIONS
+      end
+    end
+
+    # ---------------------------------------------------------------------------
+    # Explore loop
+    # ---------------------------------------------------------------------------
+
+    def process_turn(n)
+      raw    = call_model
+      action = parse_action(raw)
+
+      return handle_json_failure(n) if action.nil?
+
+      @json_failures = 0
+      tool = action["tool"]
+      args = action["args"] || {}
+
+      if tool == "done"
+        Calvin::LOG.info "ReAct explore done after #{n} turn(s)"
+        return :done
+      end
+
+      observation = dispatch_tool(tool, args)
+      Calvin::LOG.info "observation (#{tool}): #{observation[0..80]}"
+
+      record_observation(tool, args, observation)
+      append_turn(raw, observation)
+
+      handle_not_found(observation, n)
+    end
+
+    def call_model
+      raw = @mistral.complete_messages(@messages)[:content]
+      Calvin::LOG.info "ReAct turn: #{raw[0..120]}"
+      raw
+    end
+
+    def handle_json_failure(n)
+      @json_failures += 1
+      Calvin::LOG.warn "JSON parse failed (#{@json_failures}/#{GRACE_TURNS}) at turn #{n}"
+      @json_failures >= GRACE_TURNS ? :abort : :continue
+    end
+
+    def handle_not_found(observation, n)
+      if observation.start_with?("ERROR:")
+        @not_found_streak += 1
+        if @not_found_streak >= NOT_FOUND_LIMIT
+          Calvin::LOG.warn "#{NOT_FOUND_LIMIT} consecutive NOT_FOUND at turn #{n} — forcing implement"
+          return :done
+        end
+      else
+        @not_found_streak = 0
+      end
+      :continue
+    end
+
+    def append_turn(raw, observation)
+      @messages << { role: "assistant", content: raw }
+      @messages << { role: "user",      content: "Observation: #{observation}" }
+    end
+
+    # ---------------------------------------------------------------------------
+    # Fase 2 — implement
+    # ---------------------------------------------------------------------------
+
+    def implement_phase(turns)
+      Calvin::LOG.info "implement_phase after #{turns} explore turn(s)"
+
+      conventions      = load_conventions
+      response_format  = load_response_format
+      implement_system = "#{conventions}\n\n#{response_format}"
+      implement_user   = build_implement_user
+
+      response = @mistral.complete_messages([
+        { role: "system", content: implement_system },
+        { role: "user",   content: implement_user }
+      ])
+
       { content: response[:content], turns: turns, usage: response[:usage] }
     end
+
+    def build_implement_user
+      context_block = if @observations.any?
+        lines = @observations.map { |o| "#{o[:label]}:\n#{o[:content]}" }.join("\n\n---\n\n")
+        "## Context gathered during exploration\n\n#{lines}"
+      end
+
+      ["## Task", @issue_prompt, context_block].compact.reject(&:empty?).join("\n\n")
+    end
+
+    def record_observation(tool, args, observation)
+      return if observation.start_with?("ERROR:")
+
+      label = case tool
+              when "read_file" then args["path"].to_s.strip
+              when "list_dir"  then "ls #{args['path'].to_s.strip}"
+              else tool
+              end
+
+      @observations << { label: label, content: observation }
+    end
+
+    # ---------------------------------------------------------------------------
+    # Tool dispatch
+    # ---------------------------------------------------------------------------
 
     TOOLS = {
       "read_file" => ->(github, args) {
         path = args["path"].to_s.strip
-        github.get_file_content(path) || "ERROR: file non trovato: #{path}"
+        github.get_file_content(path) || "ERROR: file not found: #{path}"
       },
       "list_dir" => ->(github, args) {
         path = args["path"].to_s.strip
         entries = github.list_directory(path)
-        entries.any? ? entries.join("\n") : "ERROR: directory vuota o non trovata: #{path}"
+        entries.any? ? entries.join("\n") : "ERROR: empty or not found: #{path}"
       }
     }.freeze
 
     def dispatch_tool(tool, args)
       handler = TOOLS[tool]
       unless handler
-        Calvin::LOG.warn "Tool sconosciuto: #{tool}"
-        return "ERROR: tool sconosciuto '#{tool}'. Usa: read_file, list_dir, done."
+        Calvin::LOG.warn "Unknown tool: #{tool}"
+        return "ERROR: unknown tool '#{tool}'. Use: read_file, list_dir, done."
       end
       handler.call(@github, args)
     rescue => e
