@@ -18,6 +18,22 @@ on:
 jobs:
   calvin:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: synca_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       # 1. Clona calvin (scripts + lib)
       - name: Checkout calvin
@@ -50,7 +66,25 @@ jobs:
         run: bundle install
         working-directory: calvin/bin
 
-      # 5. Esegue Calvin
+      # 5. Ruby + gem del target (synca Rails app) — con cache
+      - name: Set up Ruby for target repo
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version-file: target/backend/api/.ruby-version
+          bundler-cache: true
+          working-directory: target/backend/api
+
+      # 6. Prepara il database test
+      - name: Setup test database
+        run: bundle exec rails db:create db:migrate
+        working-directory: target/backend/api
+        env:
+          RAILS_ENV: test
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/synca_test
+
+      # 7. Esegue Calvin
+      #    CALVIN_RAILS_ROOT: path assoluto della dir Rails di synca nel runner.
+      #    TestRunner e TestFixLoop lo usano per Dir.chdir prima di rails test.
       - name: Run Calvin
         run: bundle exec ruby $GITHUB_WORKSPACE/calvin/bin/calvin.rb
         working-directory: target
@@ -61,3 +95,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           CALVIN_MODEL: codestral-latest
+          CALVIN_RAILS_ROOT: ${{ github.workspace }}/target/backend/api
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/synca_test
+          RAILS_ENV: test
