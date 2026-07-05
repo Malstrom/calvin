@@ -2,13 +2,12 @@
 # Orchestratore Calvin — entry point per GitHub Actions.
 #
 # Routing:
-#   CALVIN_FIX_MODE=true → CiFixFlow
-#   label calvin          → ExploreFlow  (prompt da title+body)
-#   default               → errore esplicito
+#   label calvin → ExploreFlow  (prompt da title+body)
+#   default      → errore esplicito
 
 require_relative "../lib/boot"
 
-# ── Post-steps uniformi per tutti i flow ──────────────────────────────────────
+# ── Post-steps uniformi per tutti i flow ─────────────────────────────────────────────
 def run_post_steps(result, github:, workflow:, ref:, extra: {})
   if result.success?
     r = result.value!
@@ -24,8 +23,7 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
       model:         Calvin::MODEL,
       usage:         r[:usage],
       status:        r[:status] || :success,
-      explore_turns: r[:explore_turns],
-      test_pass_pct: extra[:test_pass_pct]
+      explore_turns: r[:explore_turns]
     )
   else
     err = result.failure
@@ -45,35 +43,12 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
       model:         Calvin::MODEL,
       usage:         err[:usage],
       status:        err[:status] || :failure,
-      explore_turns: err[:explore_turns],
-      test_pass_pct: extra[:test_pass_pct]
+      explore_turns: err[:explore_turns]
     )
   end
 end
 
-# ── Fix mode (trigger da workflow ci-fix) ─────────────────────────────────────
-if ENV["CALVIN_FIX_MODE"] == "true"
-  pr_number   = ENV.fetch("PR_NUMBER").to_i
-  pr_branch   = ENV.fetch("PR_BRANCH")
-  test_output = File.read(ENV.fetch("TEST_OUTPUT_PATH", "/tmp/test-output.txt"))
-
-  github = Calvin::GitHubClient.new(repo_root: "backend/api")
-  Calvin::LOG.info "fix mode — PR ##{pr_number} branch: #{pr_branch}"
-
-  result = Calvin::CiFixFlow.run(github, pr_number, pr_branch, test_output)
-  Calvin::LOG.info "CiFixFlow result: #{result.success? ? result.value! : result.failure}"
-
-  run_post_steps(result,
-    github:   github,
-    workflow: "calvin-fix",
-    ref:      pr_number,
-    extra:    { test_pass_pct: Calvin::TestOutputParser.pass_pct(test_output) }
-  )
-
-  exit(result.success? ? 0 : 1)
-end
-
-# ── Fetch issue ───────────────────────────────────────────────────────────────
+# ── Fetch issue ───────────────────────────────────────────────────────────────────────────────
 temp_github = Calvin::GitHubClient.new
 issue       = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
 labels      = issue.labels.map(&:name)
@@ -85,7 +60,7 @@ Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
 github = Calvin::GitHubClient.new(repo_root: repo_root)
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
 
-# ── Calvin mode (ExploreFlow) ─────────────────────────────────────────────────
+# ── Calvin mode (ExploreFlow) ──────────────────────────────────────────────────────────────────
 if labels.include?("calvin")
   Calvin::LOG.info "mode: calvin (ExploreFlow)"
 
@@ -99,6 +74,6 @@ if labels.include?("calvin")
   exit(result.success? ? 0 : 1)
 end
 
-# ── Nessuna label riconosciuta ────────────────────────────────────────────────
+# ── Nessuna label riconosciuta ─────────────────────────────────────────────────────────────────────
 Calvin::LOG.error "Nessuna label Calvin riconosciuta su issue ##{issue.number} (labels: #{labels.join(', ')}). Usa la label 'calvin'."
 exit(1)
