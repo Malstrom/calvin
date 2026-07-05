@@ -9,7 +9,7 @@
 #     Termina quando il modello chiama done() o si raggiunge MAX_TURNS.
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
-#     system: Calvin::CONVENTIONS_PATH dal repo target + response_format.md
+#     system: config/prompts/{stack}/implement_system.md
 #     user:   prompt issue + observations collassate dall'esplorazione
 #     Il modello scrive i FILE: blocks e il PR_BODY.
 #
@@ -34,8 +34,6 @@ module Calvin
     MAX_TURNS       = Calvin::CONFIG.dig(:react, :max_turns)       || 30
     GRACE_TURNS     = Calvin::CONFIG.dig(:react, :grace_turns)     || 2
     NOT_FOUND_LIMIT = Calvin::CONFIG.dig(:react, :not_found_limit) || 3
-
-    FALLBACK_CONVENTIONS = "You are a senior Rails developer. Follow the project conventions you have read during exploration."
 
     PROMPTS_DIR = File.expand_path("../../config/prompts", __FILE__)
 
@@ -86,26 +84,14 @@ module Calvin
       File.read(File.join(PROMPTS_DIR, "rails", "explore_system.md"), encoding: "UTF-8")
     end
 
-    def load_response_format
-      path    = File.join(PROMPTS_DIR, @stack, "response_format.md")
+    def load_implement_system
+      path    = File.join(PROMPTS_DIR, @stack, "implement_system.md")
       content = File.read(path, encoding: "UTF-8")
-      Calvin::LOG.info "ReActLoop: loaded response_format for stack=#{@stack} (#{content.bytesize} bytes)"
+      Calvin::LOG.info "ReActLoop: loaded implement_system for stack=#{@stack} (#{content.bytesize} bytes)"
       content
     rescue Errno::ENOENT
-      Calvin::LOG.warn "ReActLoop: response_format.md not found for stack=#{@stack}, using rails fallback"
-      File.read(File.join(PROMPTS_DIR, "rails", "response_format.md"), encoding: "UTF-8")
-    end
-
-    def load_conventions
-      raw = @github.get_file_content(Calvin::CONVENTIONS_PATH)
-      if raw
-        content = raw.force_encoding("UTF-8")
-        Calvin::LOG.info "load_conventions: loaded #{Calvin::CONVENTIONS_PATH} (#{content.bytesize} bytes)"
-        content
-      else
-        Calvin::LOG.warn "load_conventions: #{Calvin::CONVENTIONS_PATH} not found — using fallback"
-        FALLBACK_CONVENTIONS
-      end
+      Calvin::LOG.warn "ReActLoop: implement_system.md not found for stack=#{@stack}, using rails fallback"
+      File.read(File.join(PROMPTS_DIR, "rails", "implement_system.md"), encoding: "UTF-8")
     end
 
     # ---------------------------------------------------------------------------
@@ -173,14 +159,9 @@ module Calvin
     def implement_phase(turns)
       Calvin::LOG.info "implement_phase after #{turns} explore turn(s)"
 
-      conventions      = load_conventions
-      response_format  = load_response_format
-      implement_system = "#{conventions}\n\n#{response_format}"
-      implement_user   = build_implement_user
-
       response = @mistral.complete_messages([
-        { role: "system", content: implement_system },
-        { role: "user",   content: implement_user }
+        { role: "system", content: load_implement_system },
+        { role: "user",   content: build_implement_user }
       ])
 
       { content: response[:content], turns: turns, usage: response[:usage] }
