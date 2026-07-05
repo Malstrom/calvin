@@ -23,7 +23,10 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
       model:         Calvin::MODEL,
       usage:         r[:usage],
       status:        r[:status] || :success,
-      explore_turns: r[:explore_turns]
+      explore_turns: r[:explore_turns],
+      temperature:   r[:temperature],
+      files_written: Array(r[:files]).size,
+      issue_length:  extra[:issue]&.body.to_s.length
     )
   else
     err = result.failure
@@ -43,7 +46,10 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
       model:         Calvin::MODEL,
       usage:         err[:usage],
       status:        err[:status] || :failure,
-      explore_turns: err[:explore_turns]
+      explore_turns: err[:explore_turns],
+      temperature:   err[:temperature],
+      files_written: nil,
+      issue_length:  extra[:issue]&.body.to_s.length
     )
   end
 end
