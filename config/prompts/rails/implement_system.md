@@ -12,9 +12,14 @@ Only add or change what the task requires. Never remove, reformat, or rewrite un
 CORRECT: add a new namespace block to routes.rb keeping all existing routes intact
 WRONG:   rewrite routes.rb with only the new route
 
-**2. Migration version**
+**2. Migrations — version and timestamp**
 CORRECT: `class AddFoo < ActiveRecord::Migration[8.0]`
 WRONG:   `class AddFoo < ActiveRecord::Migration[7.1]`
+
+When creating a migration filename, NEVER invent a random or past timestamp.
+Inspect `db/migrate`, find the latest existing timestamp, and use a strictly later one.
+If the latest existing migration is `20260704153045_create_users.rb`, the new file must start with a timestamp > `20260704153045`.
+WRONG: creating `20240715120000_add_declared_preferences_to_preference_profiles.rb` in a repo whose latest migration is from 2026.
 
 **3. Model validations**
 CORRECT: `enum :field, { cool: 0, warm: 1 }`  ← enum only, nothing else
@@ -46,12 +51,28 @@ end
 - Integer ranges: use `included_in?: 1..5` inline.
 - Result: zero `rule` blocks for field validation.
 
-**5. Controller — never render json: directly**
+**5. Contract tests — Dry::Validation::Result, not monads**
+`Contract.new.call(...)` returns `Dry::Validation::Result`, NOT `Dry::Monads::Result`.
+Contract tests must use `result.success?`, `result.failure?`, and `result.errors.to_h`.
+Do NOT include `Dry::Monads[:result]` in contract test classes.
+CORRECT:
+```ruby
+result = UpsertPreferencesContract.new.call(preferences: { rhythm_importance: 6 })
+assert result.failure?
+assert_includes result.errors.to_h[:preferences][:rhythm_importance], :included_in?
+```
+WRONG:
+```ruby
+include Dry::Monads[:result]
+assert_pattern { result => Failure }
+```
+
+**6. Controller — never render json: directly**
 CORRECT: `render_success({ preferences: PreferencesSerializer.new(p).serializable_hash })`
 WRONG:   `render json: { preferences: ... }`
 Always use ApiResponse helpers: `render_success`, `render_created`, `render_error`, `render_contract_errors`.
 
-**6. Controller — pattern matching on service result**
+**7. Controller — pattern matching on service result**
 CORRECT:
 ```ruby
 case SavePreferencesService.call(...)
@@ -61,7 +82,7 @@ end
 ```
 WRONG: `if result.success? ...`
 
-**7. Tests — cover every code path**
+**8. Tests — cover every code path**
 Derive test cases directly from the code you wrote. Do not guess or use a fixed list.
 
 For every controller action:
@@ -76,26 +97,51 @@ For every service:
 
 Missing a branch = missing a test = rule violation.
 
-**8. Tests — monad include**
+**9. Service tests — correct Dry::Monads API**
+Service results are `Dry::Monads::Result`. Use `value!` or pattern matching, never `value`.
+CORRECT:
+```ruby
+assert_pattern { result => Success }
+assert_equal 3, result.value!.sleep_together_importance
+assert_equal :validation_failed, result.failure.first
+```
+WRONG:
+```ruby
+result.value   # undefined method — does not exist
+```
+
+**10. Service tests — respect fixtures and unique indexes**
+Before creating records in a service test, check whether fixtures for that model already cover the user.
+Reuse fixture-backed records instead of creating duplicates against unique indexes.
+CORRECT: call the service directly on `users(:alice)` — `alice_prefs` fixture already satisfies `find_or_initialize_by`.
+WRONG: `PreferenceProfile.create!(user: users(:alice), ...)` when `alice_prefs` already exists — causes `PG::UniqueViolation`.
+
+**11. Tests — monad include**
 Every test class using `assert_pattern { result => Success }` MUST include at the top of the class:
 ```ruby
 include Dry::Monads[:result]
 ```
-Applies to service tests and contract tests. Not needed in controller tests.
+Applies to service tests only. Not needed in contract tests or controller tests.
 
-**9. Tests — base class**
+**12. Tests — base class**
 CORRECT: `class Api::V1::FooControllerTest < ApiTestCase`
 WRONG:   `class Api::V1::FooControllerTest < ActionDispatch::IntegrationTest`
 
-**10. Tests — auth**
+**13. Tests — auth and real fixtures only**
 CORRECT: `@headers = auth_headers(users(:alice))`
 WRONG:   anything using `.jwt` — that method does not exist.
+WRONG:   referencing fixture names that do not exist (e.g. `users(:guest_user)`) without first verifying them in `test/fixtures/users.yml`.
+Only reference fixture records that actually exist in the repo.
 
-**11. Tests — do not test models**
+**14. Controller tests — request format**
+Before writing controller tests, read at least one existing controller test in `test/controllers/` and mirror its exact `post/put/patch` style, headers, and parameter encoding.
+WRONG: inventing a request format that causes `Error occurred while parsing request parameters`.
+
+**15. Tests — do not test models**
 Do not write or modify model test files. Model logic is covered by contract and service tests.
 WRONG: writing `test/models/foo_test.rb` for a new feature
 
-**12. Fixtures — new columns**
+**16. Fixtures — new columns**
 Every new column requires updating `test/fixtures/<model_plural>.yml`.
 When modifying a fixture file, copy every existing row exactly as-is and only append the new fields.
 Never change existing field values — not even formatting or quote style.
