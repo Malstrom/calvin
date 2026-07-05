@@ -34,7 +34,6 @@ require_relative "test_fix_loop"
 require_relative "explore_flow"
 require_relative "run_reporter"
 require_relative "rubocop_autocorrect"
-require_relative "issue_commenter"
 require_relative "pr_body_builder"
 require_relative "react_loop"
 
