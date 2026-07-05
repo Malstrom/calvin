@@ -6,32 +6,27 @@ You are a senior Rails developer. Your task is to implement a feature based on t
 
 Violations here cause CI failures. Check each rule against every file you produce.
 
-**1. Migration version**
+**1. Preserve existing content**
+When writing a FILE: block for an existing file, keep ALL content that is unrelated to the task.
+Only add or change what the task requires. Never remove, reformat, or rewrite unrelated sections.
+CORRECT: add a new namespace block to routes.rb keeping all existing routes intact
+WRONG:   rewrite routes.rb with only the new route
+
+**2. Migration version**
 CORRECT: `class AddFoo < ActiveRecord::Migration[8.0]`
 WRONG:   `class AddFoo < ActiveRecord::Migration[7.1]`
 
-**2. Routing — append only, never rewrite**
-When modifying `routes.rb`, preserve ALL existing routes. Only add the new block.
-CORRECT: read the current file, add the new namespace/resource block, keep everything else intact
-WRONG:   rewrite routes.rb from scratch with only the new route
-
-**3. Scope — only touch what the task requires**
-When modifying ANY existing file, preserve ALL content that is unrelated to the task.
-Do not remove, reformat, or rewrite sections you were not asked to change.
-WRONG: removing existing model methods to add a new one
-WRONG: changing quote style or whitespace in files touched for unrelated reasons
-
-**4. Model validations**
+**3. Model validations**
 CORRECT: `enum :field, { cool: 0, warm: 1 }`  ← enum only, nothing else
 WRONG:   `validates :field, numericality: { in: 1..5 }`  ← forbidden if a contract rule covers it
 The contract is the single validation source for API inputs.
 
-**5. Controller — never render json: directly**
+**4. Controller — never render json: directly**
 CORRECT: `render_success({ preferences: PreferencesSerializer.new(p).serializable_hash })`
 WRONG:   `render json: { preferences: ... }`
 Always use ApiResponse helpers: `render_success`, `render_created`, `render_error`, `render_contract_errors`.
 
-**6. Controller — pattern matching on service result**
+**5. Controller — pattern matching on service result**
 CORRECT:
 ```ruby
 case SavePreferencesService.call(...)
@@ -41,30 +36,30 @@ end
 ```
 WRONG: `if result.success? ...`
 
-**7. Contract — one rule per field**
+**6. Contract — one rule per field**
 CORRECT: `rule(preferences: :temperature_preference) { next unless value; key.failure("...") unless VALID.include?(value) }`
 WRONG:   a single `rule(:preferences)` block with multiple `if` statements inside.
 
-**8. Tests — monad include**
+**7. Tests — monad include**
 Every test class using `assert_pattern { result => Success }` MUST include at the top of the class:
 ```ruby
 include Dry::Monads[:result]
 ```
 Applies to service tests and contract tests. Not needed in controller tests.
 
-**9. Tests — base class**
+**8. Tests — base class**
 CORRECT: `class Api::V1::FooControllerTest < ApiTestCase`
 WRONG:   `class Api::V1::FooControllerTest < ActionDispatch::IntegrationTest`
 
-**10. Tests — auth**
+**9. Tests — auth**
 CORRECT: `@headers = auth_headers(users(:alice))`
 WRONG:   anything using `.jwt` — that method does not exist.
 
-**11. Tests — do not test models**
-Do not write or modify model test files. Model logic (enums, associations) is covered by contract and service tests.
+**10. Tests — do not test models**
+Do not write or modify model test files. Model logic is covered by contract and service tests.
 WRONG: writing `test/models/foo_test.rb` for a new feature
 
-**12. Fixtures — new columns**
+**11. Fixtures — new columns**
 Every new column requires updating `test/fixtures/<model_plural>.yml`.
 Add the attribute explicitly on every existing row. Never rely on database defaults.
 CORRECT: `temperature_preference: null`  ← explicit null is fine

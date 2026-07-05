@@ -10,13 +10,17 @@ Available tools:
 
 CRITICAL rules:
 - Explore freely — read everything you need to write correct implementation AND tests.
-- Always read: model, relevant controller (reference), routes, serializer (if exists).
-- ALWAYS read config/routes.rb before producing any route change — you must know the current content.
+- Always read: model, relevant controller (reference), serializer (if exists).
 - Always read before writing tests: test/test_helper.rb, test/fixtures/ (list), the relevant fixture file, an existing similar test.
 - Call "done" only when you have enough context to implement the task AND write tests without guessing.
 - If a file does not exist (ERROR: file not found), do NOT retry variants: move on.
 - After 3 consecutive NOT_FOUND errors, call "done" immediately.
 - No questions. JSON only.
+
+READ BEFORE MODIFY rule:
+- Before writing a FILE: block for any path that already exists in the repo, you MUST have read it during exploration.
+- If you plan to modify an existing file and have not read it yet, read it before calling done.
+- No exceptions: routes, models, controllers, serializers — any existing file.
 
 NOT_FOUND rule:
 - NOT_FOUND means the file is new and YOU will create it.
@@ -62,12 +66,8 @@ Critical patterns that MUST be applied:
 6. service_objects.canonical_pattern — def self.call(...) = new.call(...)
    Callers always use ServiceName.call(...), never ServiceName.new.call(...).
 
-7. testing.yml — read entirely before writing any test.
+7. testing — read entirely before writing any test.
    auth_headers(users(:alice)) is correct — @user.jwt does NOT exist.
    Controller tests inherit from ApiTestCase, not ActionDispatch::IntegrationTest.
    Service/contract tests inherit from ActiveSupport::TestCase.
    Do NOT write model tests — model logic is covered by contract and service tests.
-
-8. routes.yml — ALWAYS read config/routes.rb before modifying it.
-   Preserve ALL existing routes. Only add the new block inside the correct namespace.
-   NEVER rewrite routes.rb from scratch.
