@@ -1,4 +1,10 @@
 # frozen_string_literal: true
+# Gemfile locale — usato solo per sviluppo Calvin in isolamento
+# (es. test manuali senza synca).
+#
+# In CI questo file NON viene usato: Calvin gira con il Gemfile di synca
+# (BUNDLE_GEMFILE puntato a target/backend/api/Gemfile) dove le gem
+# di Calvin sono dichiarate sotto group :development, require: false.
 
 source "https://rubygems.org"
 

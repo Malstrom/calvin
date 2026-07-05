@@ -39,31 +39,18 @@ jobs:
           path: target
           token: ${{ secrets.SYNCA_TOKEN }}
 
-      # 3. Ruby per Calvin — versione esplicita, indipendente da synca
-      - name: Set up Ruby for Calvin
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: false
-
-      # 4. Installa le gem di Calvin
-      - name: Install Calvin gems
-        run: bundle install
-        working-directory: calvin/bin
-
-      # 5. Ruby per synca (target Rails app) — versione da .ruby-version di synca
-      #    bundler-cache: true fa bundle install automaticamente.
-      #    Questo step sovrascrive il Ruby attivo nel PATH, ma Calvin gira
-      #    dopo con bundle exec che usa il suo Gemfile — compatibile finché
-      #    synca e calvin hanno versioni Ruby compatibili.
-      - name: Set up Ruby for target repo
+      # 3. Ruby — versione da synca (.ruby-version = 3.3.1).
+      #    Le gem di Calvin (octokit, dry-transaction, base64) sono nel
+      #    Gemfile di synca sotto group :development, require: false.
+      #    Un solo bundle install, nessun setup duplicato.
+      - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version-file: target/backend/api/.ruby-version
           bundler-cache: true
           working-directory: target/backend/api
 
-      # 6. Prepara il database test
+      # 4. Prepara il database test
       - name: Setup test database
         run: bundle exec rails db:create db:migrate
         working-directory: target/backend/api
@@ -71,13 +58,16 @@ jobs:
           RAILS_ENV: test
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/synca_test
 
-      # 7. Esegue Calvin
+      # 5. Esegue Calvin
+      #    BUNDLE_GEMFILE: forza Calvin a usare il Gemfile di synca (dove
+      #    octokit, dry-transaction e base64 sono gia' installati).
       #    CALVIN_RAILS_ROOT: path assoluto della dir Rails di synca nel runner.
       #    TestRunner e TestFixLoop lo usano per Dir.chdir prima di rails test.
       - name: Run Calvin
         run: bundle exec ruby $GITHUB_WORKSPACE/calvin/bin/calvin.rb
         working-directory: target
         env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/target/backend/api/Gemfile
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
