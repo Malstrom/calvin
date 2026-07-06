@@ -16,7 +16,7 @@ role: |
 # Entry point: bin/calvin.rb
 #
 # Routing: ModeRouter.for_labels(labels) → mode symbol
-#   :explore_issue   → label "calvin" on synca issue
+#   :explore_issue   → label "calvin" on synca issue  (from routing.labels.explore in calvin.yml)
 #   :unknown         → exit(1)
 #   (future — issue #18)
 #   :pr_rubocop_fix  → label "calvin-rubocop" on synca PR
@@ -30,13 +30,21 @@ role: |
 #        PHASE 2 — IMPLEMENT (implement_system.md as system, fresh context)
 #                            single call → FILE: blocks + PR_BODY
 #   └─ FileParser            parses FILE: blocks from LLM output
-#   └─ CommitAndPr           commits files + opens PR on synca
-#   └─ RubocopAutocorrect    post-step: autocorrects Ruby style
-#   └─ RunReporter           post-step: appends row to synca/.calvin/reports/runs.csv
+#   └─ CommitAndPr           commits files + opens PR on synca → Calvin::FlowResult
+#   └─ PostSteps             post-step runner (RubocopAutocorrect + RunReporter)
+#        └─ RubocopAutocorrect  thin wrapper → delegates to RubocopRunner
+#             └─ RubocopRunner   runs rubocop -A, fetches .rubocop.yml dal repo target
+#        └─ RunReporter         appends row to synca/.calvin/reports/runs.csv + runs.md
+#
+# FlowResult  (Calvin::FlowResult) — contratto condiviso tra tutti i flow
+#   campi obbligatori: files, branch, status
+#   campi opzionali:   usage, temperature, pr_url
+#   flow_meta:         hash libero per campi specifici (explore_turns, files_fixed, …)
+#   accesso difensivo: result.meta(:explore_turns) → nil se assente
 #
 # PrRubocopFixFlow  (future — issue #18, triggered by label "calvin-rubocop" on PR)
 #   └─ GitHubClient.list_pull_request_files  fetches files changed in the PR
-#   └─ RubocopRunner         runs rubocop -A on PR files only
+#   └─ RubocopRunner         runs rubocop -A
 #   └─ GitHubClient.commit_files_atomically  commits corrections to PR branch
 #
 # PrTestFixFlow  (future — issue #18+, triggered by label "calvin-test-fix" on PR)
@@ -50,25 +58,27 @@ role: |
 
 # ── Repo structure ───────────────────────────────────────────────────────────────────────────
 repo_structure:
-  bin/calvin.rb:          entry point; uses ModeRouter for routing, case/in on mode
+  bin/calvin.rb:          entry point; ModeRouter routing, case/in on mode, PostSteps.run
 
   lib/:
-    boot.rb:              requires, Calvin::CONFIG (from calvin.yml), logging
+    boot.rb:              requires, Calvin::CONFIG (from calvin.yml), logging, REPO_ROOTS
+    flow_result.rb:       Calvin::FlowResult — contratto condiviso tra tutti i flow
     mode_router.rb:       ModeRouter.for_labels(labels) → mode symbol
+    post_steps.rb:        Calvin::PostSteps.run — RubocopAutocorrect + RunReporter + post_status
     react_loop.rb:        ReActLoop — multi-turn explore + single implement call
-    explore_flow.rb:      ExploreFlow orchestrator (dry-transaction)
+    explore_flow.rb:      ExploreFlow orchestrator (dry-transaction) → FlowResult
     context_builder.rb:   builds issue prompt string (title + body → string)
     file_parser.rb:       parses FILE: blocks from LLM text output
     commit_and_pr.rb:     commits parsed files + opens PR on synca
     mistral_client.rb:    HTTP client for Mistral API (chat completions)
-    github_client.rb:     GitHub API wrapper (file read/write, PR, comments)
-    rubocop_autocorrect.rb: post-step rubocop -A on committed Ruby files
+    github_client.rb:     GitHub API wrapper (file r/w, PR, comments, list_pull_request_files)
+    rubocop_runner.rb:    RubocopRunner.run — core rubocop logic, fetches .rubocop.yml dal repo target
+    rubocop_autocorrect.rb: thin wrapper su RubocopRunner — committa le correzioni
     run_reporter.rb:      appends run stats to synca/.calvin/reports/runs.csv + runs.md
-    issue_commenter.rb:   posts comments on synca issues (verify if orphan — issue #17 task-7)
     pr_body_builder.rb:   extracts PR_BODY_START…PR_BODY_END block from LLM output
 
   config/:
-    calvin.yml:           ALL runtime constants (react, sampling, http, model, repo, pricing)
+    calvin.yml:           ALL runtime constants (react, sampling, http, model, repo, routing, mistral, pricing)
     prompts/rails/:
       explore_system.md:  system prompt for PHASE 1 (multi-turn explore loop)
       implement_system.md: system prompt for PHASE 2 (single implement call)
@@ -78,6 +88,7 @@ repo_structure:
                           section — model tests are NEVER generated.
 
   # Note: response_format.md does NOT exist / is not loaded anywhere — orphan.
+  # Note: issue_commenter.rb DELETED (task-7) — was orphan, covered by GitHubClient.
 
 # ── Prompt files ─────────────────────────────────────────────────────────────────────────────
 prompt_files:
@@ -120,6 +131,7 @@ working_principles:
   - This space is for improving Calvin, not just writing synca issues
   - Routing lives in ModeRouter — never add if/label checks directly in bin/calvin.rb
   - All configuration constants live in calvin.yml — never hardcode values in Ruby
+  - Flow results use Calvin::FlowResult — access optional fields via result.meta(:key), never hash[:key]
 
 # ── Known recurring issues ─────────────────────────────────────────────────────────────
 known_issues:
@@ -131,6 +143,21 @@ known_issues:
     status: fixed (2026-07-06)
     fix: run_reporter.rb — r.fill(nil, r.size...CSV_HEADER.size) before csv << r
          and before build_md destructuring
+  rubocop_config_wrong_dir:
+    status: fixed (2026-07-06)
+    fix: rubocop_runner.rb — .rubocop.yml ora scaricato dal repo target
+         via github.get_file_content, non più cercato in Dir.pwd di Calvin
+  refactoring_issue_17:
+    status: completed (2026-07-06)
+    summary: |
+      - Task 1: tutte le costanti in calvin.yml (LABEL_EXPLORE, API_URL inclusi)
+      - Task 2: Calvin::ModeRouter introdotto
+      - Task 3: Calvin::FlowResult — contratto condiviso tra flow
+      - Task 4: Calvin::PostSteps — run_post_steps spostato in lib/
+      - Task 5: Calvin::RubocopRunner estratto da RubocopAutocorrect
+      - Task 6: GitHubClient#fetch_pull_request + #list_pull_request_files
+      - Task 7: issue_commenter.rb eliminato (orfano)
+      - Task 8: .agent.yml aggiornato (questo commit)
 
 scenarios:
   spec: .scenarios.yml
