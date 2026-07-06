@@ -105,16 +105,13 @@ module Calvin
       @client.create_pull_request(REPO, base, head, title, body)
     end
 
-    # Ritorna i dati di una PR.
-    # Usato da PrRubocopFixFlow e PrTestFixFlow (issue #18).
+    # Ritorna i dati di una PR (branch, head sha, stato, ecc.).
     def fetch_pull_request(number)
       @client.pull_request(REPO, number)
     end
 
-    # Ritorna i path dei file modificati in una PR.
-    # Strappa il repo_root prefix se presente, in modo che i path
-    # siano relativi alla root del progetto (es. "app/models/user.rb").
-    # Usato da PrRubocopFixFlow per sapere su quali file girare rubocop.
+    # Ritorna i path dei file modificati in una PR,
+    # con il repo_root prefix strippato (path relativi al progetto).
     def list_pull_request_files(number)
       @client.pull_request_files(REPO, number).map do |f|
         strip_repo_root(f.filename)
