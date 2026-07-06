@@ -71,8 +71,12 @@ module Calvin
     private
 
     def setup_messages
+      explore_system = load_explore_system
+      Calvin::LOG.info "context[explore_system]: #{explore_system[0..19].inspect}"
+      Calvin::LOG.info "context[issue_prompt]:   #{@issue_prompt[0..19].inspect}"
+
       @messages = [
-        { role: "system", content: load_explore_system },
+        { role: "system", content: explore_system },
         { role: "user",   content: @issue_prompt }
       ]
     end
@@ -123,6 +127,11 @@ module Calvin
       observation = dispatch_tool(tool, args)
       Calvin::LOG.info "observation (#{tool}): #{observation[0..80]}"
 
+      # Log preview del contenuto letto (read_file)
+      if tool == "read_file" && !observation.start_with?("ERROR:")
+        Calvin::LOG.info "context[#{args['path']}]: #{observation[0..19].inspect}"
+      end
+
       record_observation(tool, args, observation)
       append_turn(raw, observation)
 
@@ -166,10 +175,16 @@ module Calvin
     def implement_phase(turns)
       Calvin::LOG.info "implement_phase after #{turns} explore turn(s) (temp=#{@temp_implement})"
 
+      implement_system = load_implement_system
+      Calvin::LOG.info "context[implement_system]: #{implement_system[0..19].inspect}"
+
+      implement_user = build_implement_user
+      Calvin::LOG.info "context[implement_user]:   #{implement_user[0..19].inspect}"
+
       response = @mistral.complete_messages(
         [
-          { role: "system", content: load_implement_system },
-          { role: "user",   content: build_implement_user }
+          { role: "system", content: implement_system },
+          { role: "user",   content: implement_user }
         ],
         temperature: @temp_implement
       )
