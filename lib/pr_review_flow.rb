@@ -9,7 +9,7 @@
 #   1. Legge il commento bot CI con i test falliti dalla PR
 #   2. Estrae i file incriminati dal backtrace (BacktraceExtractor)
 #      → filtra per perimetro PR + esclude /test/
-#   3. Recupera gli snippet ±N righe attorno alla riga del backtrace
+#   3. Recupera gli snippet ±N righe attorno alla riga del backtrace (dal branch PR)
 #   4. Singola call LLM → REVIEW_COMMENT_START/END + FILE: blocks
 #   5. Commita i FILE: blocks sul branch della PR
 #   6. Posta il commento di review sulla PR
@@ -65,8 +65,8 @@ module Calvin
 
       Calvin::LOG.info "PrReviewFlow: file in scope → #{targets.map { |t| t[:path] }.join(', ')}"
 
-      # 3. Recupera snippet dei file
-      snippets = targets.map { |t| fetch_snippet(t) }.compact
+      # 3. Recupera snippet dal branch della PR (non da main)
+      snippets = targets.map { |t| fetch_snippet(t, ref: head_branch) }.compact
       if snippets.empty?
         return Failure(step: :fetch_snippets, error: "could not fetch any file snippet from PR branch", usage: nil)
       end
@@ -173,13 +173,13 @@ module Calvin
     end
 
     # ---------------------------------------------------------------------------
-    # Snippet fetching
+    # Snippet fetching — legge dal branch della PR, non da main
     # ---------------------------------------------------------------------------
 
-    def fetch_snippet(target)
-      content = @github.get_file_content(target[:path])
+    def fetch_snippet(target, ref:)
+      content = @github.get_file_content(target[:path], ref: ref)
       unless content
-        Calvin::LOG.warn "PrReviewFlow: file non trovato: #{target[:path]}"
+        Calvin::LOG.warn "PrReviewFlow: file non trovato su branch #{ref}: #{target[:path]}"
         return nil
       end
 

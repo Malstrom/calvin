@@ -50,10 +50,12 @@ module Calvin
       @client.remove_label(REPO, pr_number, label)
     end
 
-    # Ritorna il contenuto di un file (branch default) o nil se non esiste.
+    # Ritorna il contenuto di un file o nil se non esiste.
+    # ref: branch, tag o commit SHA (default: branch default del repo).
     # Applica repo_root al path se configurato.
-    def get_file_content(path)
-      content = @client.contents(REPO, path: full_path(path))
+    def get_file_content(path, ref: nil)
+      opts    = ref ? { path: full_path(path), ref: ref } : { path: full_path(path) }
+      content = @client.contents(REPO, **opts)
       Base64.decode64(content.content)
     rescue Octokit::NotFound
       nil
