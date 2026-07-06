@@ -11,11 +11,16 @@ role: |
   4. Push fixes directly to main (no PR unless Igor asks explicitly)
   Never modifies anything without explicit confirmation from Igor.
 
-# ── Architecture ──────────────────────────────────────────────────────────────
+# ── Architecture ──────────────────────────────────────────────────────────────────────────────
 # Calvin is a GitHub Actions agent written in Ruby (no Rails).
 # Entry point: bin/calvin.rb
 #
-# Two distinct flows:
+# Routing: ModeRouter.for_labels(labels) → mode symbol
+#   :explore_issue   → label "calvin" on synca issue
+#   :unknown         → exit(1)
+#   (future — issue #18)
+#   :pr_rubocop_fix  → label "calvin-rubocop" on synca PR
+#   :pr_test_fix     → label "calvin-test-fix" on synca PR
 #
 # ExploreFlow  (triggered by label "calvin" on a synca issue)
 #   └─ ContextBuilder        builds issue prompt string
@@ -29,24 +34,29 @@ role: |
 #   └─ RubocopAutocorrect    post-step: autocorrects Ruby style
 #   └─ RunReporter           post-step: appends row to synca/.calvin/reports/runs.csv
 #
-# CiFixFlow  (triggered by CALVIN_FIX_MODE=true, e.g. failing CI on a Calvin PR)
-#   └─ classifies error as :structural / :logical / :infra
-#   └─ only :structural errors are auto-fixed (syntax, rubocop)
-#   └─ FixPromptBuilder      builds fix prompt programmatically (no markdown file)
-#   └─ MistralClient.complete  single call, model: codestral-latest
-#   └─ FileParser + commit_fix + post_comment
+# PrRubocopFixFlow  (future — issue #18, triggered by label "calvin-rubocop" on PR)
+#   └─ GitHubClient.list_pull_request_files  fetches files changed in the PR
+#   └─ RubocopRunner         runs rubocop -A on PR files only
+#   └─ GitHubClient.commit_files_atomically  commits corrections to PR branch
+#
+# PrTestFixFlow  (future — issue #18+, triggered by label "calvin-test-fix" on PR)
+#   └─ reads CI failure logs
+#   └─ MistralClient  single call to generate micro-fixes
+#   └─ FileParser + CommitAndPr on PR branch
 #
 # Model: Mistral codestral-latest for all LLM calls
 # Pricing: config/calvin.yml → pricing.models
+# All constants: config/calvin.yml → no hardcoded values in Ruby
 
-# ── Repo structure ────────────────────────────────────────────────────────────
+# ── Repo structure ───────────────────────────────────────────────────────────────────────────
 repo_structure:
-  bin/calvin.rb:          entry point, flow routing (ExploreFlow vs CiFixFlow)
+  bin/calvin.rb:          entry point; uses ModeRouter for routing, case/in on mode
 
   lib/:
-    boot.rb:              requires, Calvin::CONFIG, logging
+    boot.rb:              requires, Calvin::CONFIG (from calvin.yml), logging
+    mode_router.rb:       ModeRouter.for_labels(labels) → mode symbol
     react_loop.rb:        ReActLoop — multi-turn explore + single implement call
-    explore_flow.rb:      ExploreFlow orchestrator
+    explore_flow.rb:      ExploreFlow orchestrator (dry-transaction)
     context_builder.rb:   builds issue prompt string (title + body → string)
     file_parser.rb:       parses FILE: blocks from LLM text output
     commit_and_pr.rb:     commits parsed files + opens PR on synca
@@ -54,11 +64,11 @@ repo_structure:
     github_client.rb:     GitHub API wrapper (file read/write, PR, comments)
     rubocop_autocorrect.rb: post-step rubocop -A on committed Ruby files
     run_reporter.rb:      appends run stats to synca/.calvin/reports/runs.csv + runs.md
-    issue_commenter.rb:   posts comments on synca issues
+    issue_commenter.rb:   posts comments on synca issues (verify if orphan — issue #17 task-7)
     pr_body_builder.rb:   extracts PR_BODY_START…PR_BODY_END block from LLM output
 
   config/:
-    calvin.yml:           runtime config (max_turns, model, repo paths, pricing)
+    calvin.yml:           ALL runtime constants (react, sampling, http, model, repo, pricing)
     prompts/rails/:
       explore_system.md:  system prompt for PHASE 1 (multi-turn explore loop)
       implement_system.md: system prompt for PHASE 2 (single implement call)
@@ -68,9 +78,8 @@ repo_structure:
                           section — model tests are NEVER generated.
 
   # Note: response_format.md does NOT exist / is not loaded anywhere — orphan.
-  # Note: CiFixFlow has no markdown prompt file; system prompt is built in Ruby.
 
-# ── Prompt files ──────────────────────────────────────────────────────────────
+# ── Prompt files ─────────────────────────────────────────────────────────────────────────────
 prompt_files:
   explore_system.md:
     path: config/prompts/rails/explore_system.md
@@ -87,7 +96,7 @@ prompt_files:
       - Domain rules: migration version, enum-only models, contract validation,
         controller pattern (case/in), service monads, fixture safety
 
-# ── Target repo ───────────────────────────────────────────────────────────────
+# ── Target repo ─────────────────────────────────────────────────────────────────────────────
 target_repo:
   name: synca
   owner: Malstrom
@@ -100,7 +109,7 @@ target_repo:
     - test/services/     # service tests live here
     - test/contracts/    # contract tests live here
 
-# ── Working principles ────────────────────────────────────────────────────────
+# ── Working principles ────────────────────────────────────────────────────────────────────────
 working_principles:
   - Push directly to main unless Igor explicitly asks for a PR
   - Always read the relevant file before modifying it (get SHA for updates)
@@ -109,8 +118,10 @@ working_principles:
   - When Calvin generates model tests in a PR, delete them and fix implement_system.md
   - Never merge PRs without Igor's confirmation
   - This space is for improving Calvin, not just writing synca issues
+  - Routing lives in ModeRouter — never add if/label checks directly in bin/calvin.rb
+  - All configuration constants live in calvin.yml — never hardcode values in Ruby
 
-# ── Known recurring issues ────────────────────────────────────────────────────
+# ── Known recurring issues ─────────────────────────────────────────────────────────────
 known_issues:
   model_tests_generated:
     status: fixed (2026-07-06)
