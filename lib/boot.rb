@@ -32,6 +32,7 @@ require_relative "rubocop_autocorrect"
 require_relative "issue_commenter"
 require_relative "pr_body_builder"
 require_relative "react_loop"
+require_relative "mode_router"
 
 module Calvin
   REPO  = ENV.fetch("GITHUB_REPOSITORY")
