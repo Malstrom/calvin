@@ -1,12 +1,18 @@
 # frozen_string_literal: true
 # Parsea la risposta del modello ed estrae i blocchi FILE: e il PR body.
 #
-# Formato FILE: blocks:
+# Formati FILE: block supportati (entrambi validi):
 #
-#   FILE: path/to/file.rb
-#   ```ruby
-#   # contenuto completo
-#   ```
+#   Formato con fence (vecchio):
+#     FILE: path/to/file.rb
+#     ```ruby
+#     # contenuto completo
+#     ```
+#
+#   Formato senza fence (attuale — implement_system dice "no markdown fences"):
+#     FILE: path/to/file.rb
+#     # contenuto completo
+#     <riga vuota o prossimo FILE: o PR_BODY_START o fine stringa>
 #
 # Formato PR body:
 #
@@ -19,13 +25,24 @@
 
 module Calvin
   class FileParser
-    # Matches: FILE: path\n```(lang)?\ncontent\n```
-    FILE_BLOCK    = /^FILE:\s*(.+?)\n```[\w]*\n(.*?)^```/m
+    # Formato con backtick fence: FILE: path\n```(lang)?\ncontent\n```
+    FILE_BLOCK_FENCED = /^FILE:\s*(.+?)\n```[\w]*\n(.*?)^```/m
+
+    # Formato senza fence: FILE: path\ncontent\n (fino al prossimo FILE:, PR_BODY_START, o fine stringa)
+    FILE_BLOCK_PLAIN  = /^FILE:\s*(.+?)\n(.*?)(?=^FILE:|^PR_BODY_START|\z)/m
+
     PR_BODY_BLOCK = /^PR_BODY_START\s*\n(.*?)\nPR_BODY_END/m
 
     def self.parse(content)
-      content.scan(FILE_BLOCK).map do |path, file_content|
+      # Prova prima il formato con fence
+      fenced = content.scan(FILE_BLOCK_FENCED).map do |path, file_content|
         { path: path.strip, content: file_content }
+      end
+      return fenced if fenced.any?
+
+      # Fallback: formato senza fence
+      content.scan(FILE_BLOCK_PLAIN).map do |path, file_content|
+        { path: path.strip, content: file_content.rstrip }
       end
     end
 
