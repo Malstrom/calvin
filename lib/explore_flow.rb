@@ -69,6 +69,10 @@ module Calvin
         return Failure(step: :parse_files, error: "nessun FILE: block prodotto dal modello", usage: usage, explore_turns: explore_turns)
       end
 
+      # Log dei path prodotti da Codestral — visibili prima del commit
+      Calvin::LOG.info "parse_files: #{files.size} file(s) generati da Codestral:"
+      files.each { |f| Calvin::LOG.info "  → #{f[:path]}" }
+
       pr_body = FileParser.parse_pr_body(content)
       Success(
         github:        github,
