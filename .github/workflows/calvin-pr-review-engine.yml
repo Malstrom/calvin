@@ -1,0 +1,68 @@
+name: Calvin PR Review Engine
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: number
+      target_repo:
+        required: true
+        type: string
+    secrets:
+      SYNCA_TOKEN:
+        required: true
+      MISTRAL_API_KEY:
+        required: true
+
+jobs:
+  pr-review:
+    runs-on: ubuntu-latest
+
+    concurrency:
+      group: calvin-pr-review-${{ inputs.pr_number }}
+      cancel-in-progress: false
+
+    steps:
+      # 1. Clona calvin (scripts + lib)
+      - name: Checkout calvin
+        uses: actions/checkout@v4
+        with:
+          repository: Malstrom/calvin
+          token: ${{ secrets.SYNCA_TOKEN }}
+          path: calvin
+
+      # 2. Clona il repo target sul branch della PR
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repo }}
+          token: ${{ secrets.SYNCA_TOKEN }}
+          path: target
+
+      # 3. Git identity
+      - name: Configure git identity
+        run: |
+          git config --global user.email "calvin@synca.app"
+          git config --global user.name "Calvin"
+
+      # 4. Ruby + gem di Calvin
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install Ruby dependencies (calvin)
+        run: bundle install
+        working-directory: calvin/bin
+
+      # 5. Esegue Calvin in modalità PR review
+      - name: Run Calvin PR Review
+        run: bundle exec ruby $GITHUB_WORKSPACE/calvin/bin/calvin.rb
+        working-directory: target
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/calvin/bin/Gemfile
+          PULL_REQUEST_NUMBER: ${{ inputs.pr_number }}
+          GITHUB_REPOSITORY: ${{ inputs.target_repo }}
+          GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          CALVIN_MODEL: codestral-latest
