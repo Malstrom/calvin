@@ -12,6 +12,7 @@ sampling:
     explore:    0.1   # ReAct loop — leggera variabilità per tool selection
     implement:  0.0   # Codegen puro — massima riproducibilità
     pr_fix:     0.0   # PrRubocopFixFlow / PrTestFixFlow — deterministico
+    pr_review:  0.0   # PrReviewFlow — deterministico
   max_tokens: 8192
 
 http:
@@ -26,7 +27,8 @@ mistral:
 
 routing:
   labels:
-    explore: calvin   # label che triggerisce ExploreFlow su una issue
+    explore:   calvin       # label che triggerisce ExploreFlow su una issue
+    pr_review: calvin-fix   # label che triggerisce PrReviewFlow su una PR
 
 repo:
   default_branch:    main
@@ -39,6 +41,9 @@ repo:
   roots:
     rails:   backend/api
     flutter: frontend/mobile
+
+pr_review:
+  snippet_context_lines: 20   # righe sopra/sotto la riga del backtrace da mandare al LLM
 
 pricing:
   models:
