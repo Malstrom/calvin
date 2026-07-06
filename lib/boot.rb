@@ -4,6 +4,8 @@
 
 require "yaml"
 require "logger"
+require "csv"
+require "octokit"
 require "dry/monads"
 require "dry/transaction"
 
