@@ -22,6 +22,11 @@ module Calvin
   # Modello attivo — da env o config.
   MODEL = ENV.fetch("CALVIN_MODEL", CONFIG.dig(:model, :default) || "codestral-latest").freeze
 
+  # Repo target — formato "owner/repo".
+  # CALVIN_TARGET_REPO è impostato esplicitamente nel workflow Calvin.
+  # Fallback a GITHUB_REPOSITORY per compatibilità (es. run locali).
+  REPO = ENV.fetch("CALVIN_TARGET_REPO") { ENV.fetch("GITHUB_REPOSITORY") }.freeze
+
   # Roots per repo target (stack => path relativo).
   REPO_ROOTS = (CONFIG.dig(:repo, :roots) || {}).transform_keys(&:to_s).freeze
 end
