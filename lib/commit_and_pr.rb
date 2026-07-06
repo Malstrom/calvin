@@ -2,15 +2,20 @@
 # Crea branch, committa i file e apre la PR.
 # Singola responsabilità: I/O Git + GitHub API.
 #
-# Non è più un mixin include — viene chiamato esplicitamente dai flow.
-# PrBodyBuilder costruisce il body della PR.
+# Naming convention branch:
+#   issue-{N}-{slug-del-titolo}-calvin
+# Esempio:
+#   issue-100-declared-preferences-questionario-5-domande-calvin
+#
+# Naming PR title:
+#   [Calvin] [TAG] Titolo issue
+# (nessun URL in fondo — il link all'issue è nel body via "Closes #N")
 #
 # Uso:
 #   Calvin::CommitAndPr.call(
 #     files:         [ {path:, content:} ],
 #     issue:         issue,
 #     github:        github_client,
-#     branch_prefix: nil,          # opzionale — default letto da CONFIG
 #     usage:         hash | nil,
 #     description:   string | nil
 #   ) → Success({ pr_url:, branch:, files: }) | Failure({ step:, error: })
@@ -23,14 +28,10 @@ module Calvin
     include Dry::Monads[:result]
     extend self
 
-    # branch_prefix default letto da CONFIG — nessun valore hardcodato.
-    DEFAULT_BRANCH_PREFIX = (Calvin::CONFIG.dig(:repo, :branch_prefix) || "auto").freeze
-
-    def call(files:, issue:, github:, branch_prefix: nil, usage: nil, description: nil)
-      prefix    = branch_prefix || DEFAULT_BRANCH_PREFIX
-      timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
+    def call(files:, issue:, github:, usage: nil, description: nil)
       run_id    = ENV.fetch("GITHUB_RUN_ID", Time.now.to_i.to_s)
-      branch    = "#{prefix}/issue-#{issue.number}-#{run_id}"
+      branch    = build_branch(issue, run_id)
+      timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
 
       resolved = files.map do |f|
         { path: f[:path].gsub("[timestamp]", timestamp), content: f[:content] }
@@ -45,8 +46,7 @@ module Calvin
         branch:  branch
       )
 
-      issue_url = "https://github.com/#{Calvin::REPO}/issues/#{issue.number}"
-      pr_title  = "[Calvin] #{issue.title} — #{issue_url}"
+      pr_title = build_pr_title(issue)
 
       pr = github.create_pull_request(
         title: pr_title,
@@ -58,6 +58,26 @@ module Calvin
       Success({ pr_url: pr.html_url, branch: branch, files: resolved })
     rescue => e
       Failure({ step: :commit_and_pr, error: e.message })
+    end
+
+    private
+
+    # issue-100-declared-preferences-questionario-5-domande-calvin
+    def build_branch(issue, run_id)
+      slug = issue.title
+        .downcase
+        .gsub(/[^\w\s-]/, "")
+        .gsub(/[\s_]+/, "-")
+        .squeeze("-")
+        .slice(0, 60)
+        .sub(/-+$/, "")
+      "issue-#{issue.number}-#{slug}-calvin"
+    end
+
+    # [Calvin] [US-02] Declared Preferences — questionario 5 domande
+    # (titolo preso verbatim dall'issue, senza URL)
+    def build_pr_title(issue)
+      "[Calvin] #{issue.title}"
     end
   end
 end

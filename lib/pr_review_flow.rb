@@ -3,7 +3,7 @@
 #
 # Attivato dalla label `calvin-fix` su una PR di synca.
 # NON usa ReActLoop: il contesto è già noto (errore CI + file dal backtrace).
-# Singola call LLM (temperatura 0.0) — identica alla fase implement di ExploreFlow.
+# Singola call LLM (temperatura 0.0).
 #
 # Flusso:
 #   1. Legge il commento bot CI con i test falliti dalla PR
@@ -12,18 +12,17 @@
 #   3. Recupera gli snippet ±N righe attorno alla riga del backtrace (dal branch PR)
 #   4. Singola call LLM → REVIEW_COMMENT_START/END + FILE: blocks
 #   5. Commita i FILE: blocks sul branch della PR
-#   6. Posta il commento di review sulla PR
+#   6. Posta il commento di review sulla PR (firmato con token usage + checkbox)
 #
 # Contratto risultato (identico a ExploreFlow):
 #   Success(Calvin::FlowResult)
 #   Failure({ step:, error:, usage: })
-#
-# .run(github, pull_request, pr_files) → Dry::Monads::Result
 
 require "dry/monads"
 require_relative "file_parser"
 require_relative "flow_result"
 require_relative "mistral_client"
+require_relative "pr_body_builder"
 
 module Calvin
   class PrReviewFlow
@@ -65,7 +64,7 @@ module Calvin
 
       Calvin::LOG.info "PrReviewFlow: file in scope → #{targets.map { |t| t[:path] }.join(', ')}"
 
-      # 3. Recupera snippet dal branch della PR (non da main)
+      # 3. Recupera snippet dal branch della PR
       snippets = targets.map { |t| fetch_snippet(t, ref: head_branch) }.compact
       if snippets.empty?
         return Failure(step: :fetch_snippets, error: "could not fetch any file snippet from PR branch", usage: nil)
@@ -89,8 +88,8 @@ module Calvin
       Calvin::LOG.info "PrReviewFlow: LLM response (#{raw.bytesize} bytes)"
 
       # 5. Parsa output
-      review_comment = extract_review_comment(raw)
-      parsed_files   = FileParser.parse(raw)
+      review_text  = extract_review_comment(raw)
+      parsed_files = FileParser.parse(raw)
 
       # 6. Commita se ci sono file da fixare
       if parsed_files.any?
@@ -104,11 +103,10 @@ module Calvin
         Calvin::LOG.info "PrReviewFlow: nessun FILE: block — fix impossibile o non necessario"
       end
 
-      # 7. Posta il commento sulla PR
-      if review_comment
-        @github.post_pr_comment(pr_number, review_comment)
-        Calvin::LOG.info "PrReviewFlow: commento review postato su PR ##{pr_number}"
-      end
+      # 7. Posta commento firmato con token usage + checkbox
+      comment_body = PrBodyBuilder.review_comment(usage: usage, review_text: review_text)
+      @github.post_pr_comment(pr_number, comment_body)
+      Calvin::LOG.info "PrReviewFlow: commento review postato su PR ##{pr_number}"
 
       Success(
         Calvin::FlowResult.success(
@@ -125,10 +123,6 @@ module Calvin
 
     private
 
-    # ---------------------------------------------------------------------------
-    # Helpers PR
-    # ---------------------------------------------------------------------------
-
     def pr_number
       @pull_request[:number] || @pull_request.number
     end
@@ -144,10 +138,6 @@ module Calvin
         .max_by(&:created_at)
         &.body
     end
-
-    # ---------------------------------------------------------------------------
-    # BacktraceExtractor
-    # ---------------------------------------------------------------------------
 
     module BacktraceExtractor
       BACKTRACE_RE = /^\s+(\S+\.rb):(\d+):/.freeze
@@ -172,10 +162,6 @@ module Calvin
       end
     end
 
-    # ---------------------------------------------------------------------------
-    # Snippet fetching — legge dal branch della PR, non da main
-    # ---------------------------------------------------------------------------
-
     def fetch_snippet(target, ref:)
       content = @github.get_file_content(target[:path], ref: ref)
       unless content
@@ -193,10 +179,6 @@ module Calvin
       { path: target[:path], snippet: snippet, line: target[:line], start_line: start_line }
     end
 
-    # ---------------------------------------------------------------------------
-    # User prompt
-    # ---------------------------------------------------------------------------
-
     def build_user_prompt(error_comment, snippets)
       parts = []
       parts << "## Failing test output"
@@ -211,10 +193,6 @@ module Calvin
       end
       parts.join("\n")
     end
-
-    # ---------------------------------------------------------------------------
-    # Output parsing
-    # ---------------------------------------------------------------------------
 
     def extract_review_comment(raw)
       match = raw.match(/#{REVIEW_START}\s*\n(.*?)\n#{REVIEW_END}/m)

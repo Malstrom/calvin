@@ -1,14 +1,9 @@
 # frozen_string_literal: true
-# Scrive le statistiche di ogni run Calvin in .calvin/reports/ nel repo target.
+# Scrive le statistiche di ogni run Calvin in .calvin/reports/runs.csv nel repo target.
 #
-# Produce due file (append CSV + regen MD) in un unico commit atomico.
+# Produce solo il CSV (runs.md rimosso — non aggiunge valore rispetto al CSV).
 # I prezzi dei token vengono letti da Calvin::CONFIG — mai hardcodati.
 # REPORTS_DIR e il branch di scrittura vengono letti da Calvin::CONFIG.
-#
-# Il GitHubClient passato come `github:` ha già il repo_root corretto
-# (es. "backend/api"), quindi i file vengono scritti nel path giusto:
-#   backend/api/.calvin/reports/runs.csv
-#   backend/api/.calvin/reports/runs.md
 #
 # Uso:
 #   Calvin::RunReporter.write(
@@ -18,23 +13,20 @@
 #     model:         "codestral-latest",
 #     usage:         result[:usage],
 #     status:        :success,
-#     explore_turns: result[:explore_turns],   # opzionale, specifico ExploreFlow
+#     explore_turns: result[:explore_turns],
 #     temperature:   result[:temperature],
 #     files_written: result[:files_written],
-#     issue_length:  issue.body.to_s.length,   # opzionale, specifico ExploreFlow
-#     test_pass_pct: nil                        # opzionale, futuro PrTestFixFlow
+#     issue_length:  issue.body.to_s.length
 #   )
 
 require "csv"
 
 module Calvin
   module RunReporter
-    # Path e branch letti da CONFIG — nessun valore hardcodato.
     REPORTS_DIR    = Calvin::CONFIG.dig(:repo, :reports_dir)    || ".calvin/reports"
     DEFAULT_BRANCH = Calvin::CONFIG.dig(:repo, :default_branch) || "main"
 
     CSV_PATH = "#{REPORTS_DIR}/runs.csv"
-    MD_PATH  = "#{REPORTS_DIR}/runs.md"
 
     CSV_HEADER = %w[
       run_at workflow ref model
@@ -43,8 +35,6 @@ module Calvin
       temperature files_written issue_length
     ].freeze
 
-    # explore_turns, test_pass_pct, issue_length sono opzionali e specifici
-    # per singolo flow — vengono lasciati nil per i flow che non li producono.
     STATUS_EMOJI = {
       "success"   => "✅",
       "fixed"     => "✅",
@@ -102,13 +92,8 @@ module Calvin
         rows.each { |r| csv << r.fill(nil, r.size...CSV_HEADER.size) }
       end
 
-      md_content = build_md(rows)
-
       github.commit_files_atomically(
-        [
-          { path: CSV_PATH, content: csv_content },
-          { path: MD_PATH,  content: md_content  }
-        ],
+        [{ path: CSV_PATH, content: csv_content }],
         message: "chore: calvin run report — #{workflow} ref ##{ref}",
         branch:  DEFAULT_BRANCH
       )
@@ -118,8 +103,6 @@ module Calvin
       Calvin::LOG.warn "RunReporter FAILED: #{e.class} — #{e.message}\n#{e.backtrace.first(3).join("\n")}"
     end
 
-    # ── private ────────────────────────────────────────────────────────────────
-
     def self.calculate_cost(prompt_tok, compl_tok, model, pricing)
       p            = pricing[model.to_sym] || pricing[model] || {}
       input_price  = p[:input_per_million].to_f
@@ -128,33 +111,5 @@ module Calvin
        (compl_tok  / 1_000_000.0) * output_price).round(6)
     end
     private_class_method :calculate_cost
-
-    def self.build_md(rows)
-      header = "| Date | Workflow | Ref | Model | Prompt tok | Completion tok | Total tok | Cost USD | Status | Explore turns | Test pass % | Temperature | Files written | Issue length |"
-      sep    = "|------|----------|-----|-------|-----------|----------------|-----------|----------|--------|---------------|-------------|-------------|---------------|---------------|"
-
-      table_rows = rows.map do |r|
-        r = r.fill(nil, r.size...CSV_HEADER.size)
-        run_at, workflow, ref, model, pt, ct, tt, cost, status,
-          explore_turns, pct, temperature, files_written, issue_length = r
-        date    = run_at.to_s[0..15].tr("T", " ")
-        emoji   = STATUS_EMOJI[status] || "❓"
-        pct_s   = pct.to_s.empty?            ? "—" : "#{pct}%"
-        turns_s = explore_turns.to_s.empty?  ? "—" : explore_turns.to_s
-        temp_s  = temperature.to_s.empty?    ? "—" : temperature.to_s
-        files_s = files_written.to_s.empty?  ? "—" : files_written.to_s
-        ilen_s  = issue_length.to_s.empty?   ? "—" : issue_length.to_s
-        "| #{date} | #{workflow} | \##{ref} | #{model} | #{format_num(pt)} | #{format_num(ct)} | #{format_num(tt)} | $#{cost} | #{emoji} #{status} | #{turns_s} | #{pct_s} | #{temp_s} | #{files_s} | #{ilen_s} |"
-      end
-
-      lines = ["# Calvin Run Reports", "", header, sep] + table_rows + [""]
-      lines.join("\n")
-    end
-    private_class_method :build_md
-
-    def self.format_num(n)
-      n.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\1 ').reverse
-    end
-    private_class_method :format_num
   end
 end
