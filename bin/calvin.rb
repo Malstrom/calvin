@@ -8,53 +8,6 @@
 
 require_relative "../lib/boot"
 
-# ── Post-steps uniformi per tutti i flow ────────────────────────────────────────────────────
-def run_post_steps(result, github:, workflow:, ref:, extra: {})
-  if result.success?
-    r = result.value!  # Calvin::FlowResult
-    Calvin::RubocopAutocorrect.run(
-      files:  r.files  || [],
-      branch: r.branch || "",
-      github: github
-    )
-    Calvin::RunReporter.write(
-      github:        github,
-      workflow:      workflow,
-      ref:           ref,
-      model:         Calvin::MODEL,
-      usage:         r.usage,
-      status:        r.status,
-      explore_turns: r.meta(:explore_turns),   # nil se flow diverso da ExploreFlow
-      temperature:   r.temperature,
-      files_written: Array(r.files).size,
-      issue_length:  extra[:issue]&.body.to_s.length
-    )
-  else
-    err = result.failure
-    Calvin::LOG.error "FAILURE step=#{err[:step]} — #{err[:error]}"
-    begin
-      github.post_status(
-        extra[:issue] || ref,
-        "\u{1F534} Calvin error (#{err[:step]})\n\n```\n#{err[:error]}\n```"
-      ) if extra[:issue]
-    rescue => e
-      Calvin::LOG.warn "post_status fallito: #{e.message}"
-    end
-    Calvin::RunReporter.write(
-      github:        github,
-      workflow:      workflow,
-      ref:           ref,
-      model:         Calvin::MODEL,
-      usage:         err[:usage],
-      status:        err[:status] || :failure,
-      explore_turns: err[:explore_turns],      # nil se flow diverso da ExploreFlow
-      temperature:   err[:temperature],
-      files_written: nil,
-      issue_length:  extra[:issue]&.body.to_s.length
-    )
-  end
-end
-
 # ── Fetch issue ────────────────────────────────────────────────────────────────────────────────────
 temp_github = Calvin::GitHubClient.new
 issue       = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
@@ -74,11 +27,12 @@ Calvin::LOG.info "mode: #{mode}"
 case mode
 in :explore_issue
   result = Calvin::ExploreFlow.run(github, issue)
-  run_post_steps(result,
+  Calvin::PostSteps.run(
+    result,
     github:   github,
     workflow: "calvin",
     ref:      issue.number,
-    extra:    { issue: issue }
+    issue:    issue
   )
   exit(result.success? ? 0 : 1)
 

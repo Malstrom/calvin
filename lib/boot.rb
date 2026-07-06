@@ -13,6 +13,7 @@ require_relative "github_client"
 require_relative "mistral_client"
 require_relative "rubocop_autocorrect"
 require_relative "run_reporter"
+require_relative "post_steps"
 
 module Calvin
   # Logger
