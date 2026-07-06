@@ -249,7 +249,7 @@ module Calvin
                    .find { |l| l.strip.start_with?("{") }&.strip
       return nil unless cleaned
       JSON.parse(cleaned)
-    rescue JSON::ParseError => e
+    rescue JSON::ParserError => e
       Calvin::LOG.warn "ReAct JSON error: #{e.message}"
       nil
     end
