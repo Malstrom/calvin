@@ -31,12 +31,20 @@ module Calvin
   REPO_ROOTS = (CONFIG.dig(:repo, :roots) || {}).transform_keys(&:to_s).freeze
 end
 
-# Tutti i require_relative vengono DOPO la definizione di Calvin::CONFIG
-# perché alcuni moduli accedono a CONFIG a load-time (es. mode_router.rb).
+# Tutti i require_relative vengono DOPO la definizione di Calvin::CONFIG e Calvin::REPO
+# perché alcuni moduli accedono a queste costanti a load-time.
+#
+# Ordine: primitivi → client → parser → flow components → flow → post-steps
 require_relative "flow_result"
 require_relative "mode_router"
 require_relative "github_client"
 require_relative "mistral_client"
+require_relative "context_builder"
+require_relative "file_parser"
+require_relative "pr_body_builder"
+require_relative "react_loop"
+require_relative "commit_and_pr"
+require_relative "explore_flow"
 require_relative "rubocop_runner"
 require_relative "rubocop_autocorrect"
 require_relative "run_reporter"
