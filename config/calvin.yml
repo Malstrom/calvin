@@ -11,7 +11,6 @@ sampling:
   temperature:
     explore:    0.1   # ReAct loop — leggera variabilità per tool selection
     implement:  0.0   # Codegen puro — massima riproducibilità
-    pr_fix:     0.0   # PrRubocopFixFlow / PrTestFixFlow — deterministico
     pr_review:  0.0   # PrReviewFlow — deterministico
   max_tokens: 8192
 
