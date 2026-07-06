@@ -14,13 +14,10 @@ require "json"
 
 module Calvin
   class MistralClient
-    API_URL = URI("https://api.mistral.ai/v1/chat/completions")
-
-    # Timeout letti da config — nessun valore hardcodato.
+    # Tutti i valori letti da CONFIG — nessun valore hardcodato.
+    API_URL      = URI(Calvin::CONFIG.dig(:mistral, :api_url) || "https://api.mistral.ai/v1/chat/completions")
     OPEN_TIMEOUT = Calvin::CONFIG.dig(:http, :open_timeout) || 15
     READ_TIMEOUT = Calvin::CONFIG.dig(:http, :read_timeout) || 180
-
-    # Modello di default: prima ENV, poi config, poi stringa di sicurezza.
     DEFAULT_MODEL = ENV.fetch("CALVIN_MODEL", Calvin::CONFIG.dig(:model, :default) || "codestral-latest")
 
     def initialize(api_key: ENV.fetch("MISTRAL_API_KEY"))

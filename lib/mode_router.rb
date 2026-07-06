@@ -2,9 +2,10 @@
 # Determina il mode di esecuzione Calvin in base alle label dell'issue.
 #
 # Centralizza il routing — bin/calvin.rb non contiene più if inline sulle label.
+# Le label di trigger sono lette da Calvin::CONFIG — nessun valore hardcodato.
 #
 # Mode correnti:
-#   :explore_issue   — label "calvin" su issue synca (ExploreFlow)
+#   :explore_issue   — label da config routing.labels.explore (default: "calvin")
 #   :unknown         — nessuna label Calvin riconosciuta
 #
 # Mode futuri (issue #18):
@@ -17,7 +18,8 @@
 
 module Calvin
   module ModeRouter
-    LABEL_EXPLORE = "calvin"
+    # Lette da CONFIG — nessun valore hardcodato.
+    LABEL_EXPLORE = (Calvin::CONFIG.dig(:routing, :labels, :explore) || "calvin").freeze
 
     def self.for_labels(labels)
       return :explore_issue if labels.include?(LABEL_EXPLORE)

@@ -9,7 +9,7 @@ react:
 
 sampling:
   temperature:
-    explore:    0.1   # ReAct loop — leggera variabilitàper tool selection
+    explore:    0.1   # ReAct loop — leggera variabilità per tool selection
     implement:  0.0   # Codegen puro — massima riproducibilità
     pr_fix:     0.0   # PrRubocopFixFlow / PrTestFixFlow — deterministico
   max_tokens: 8192
@@ -20,6 +20,13 @@ http:
 
 model:
   default: codestral-latest   # fallback quando CALVIN_MODEL env non è impostata
+
+mistral:
+  api_url: https://api.mistral.ai/v1/chat/completions
+
+routing:
+  labels:
+    explore: calvin   # label che triggerisce ExploreFlow su una issue
 
 repo:
   default_branch:    main
