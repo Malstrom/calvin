@@ -10,8 +10,15 @@
 # Stack ("rails" | "flutter") determinato dalle label dell'issue.
 # Default letto da CONFIG[:repo][:stacks][:default].
 #
-# Ritorna:
-#   Success({ status: :success, pr_url:, branch:, files:, usage:, explore_turns: })
+# Contratto risultato (per run_post_steps + reporter):
+#   Success({
+#     files:         Array<Hash>,   # [{ path:, content: }]
+#     branch:        String,
+#     status:        Symbol,       # :success | :failure | :partial
+#     usage:         Hash | nil,
+#     temperature:   Float | nil,
+#     explore_turns: Integer | nil # specifico di ExploreFlow
+#   })
 #   Failure({ step:, error:, usage:, explore_turns: })
 
 require "dry/transaction"
@@ -91,7 +98,15 @@ module Calvin
       )
       return Failure(result.failure.merge(explore_turns: explore_turns)) if result.failure?
 
-      Success(result.value!.merge(usage: usage, explore_turns: explore_turns, status: :success))
+      value = result.value!
+      Success(
+        files:         value[:files],
+        branch:        value[:branch],
+        status:        :success,
+        usage:         usage,
+        temperature:   value[:temperature],
+        explore_turns: explore_turns
+      )
     rescue => e
       Failure(step: :commit_and_pr, error: e.message, usage: usage, explore_turns: explore_turns)
     end
