@@ -3,6 +3,7 @@
 #
 # Produce due file (append CSV + regen MD) in un unico commit atomico.
 # I prezzi dei token vengono letti da Calvin::CONFIG — mai hardcodati.
+# REPORTS_DIR e il branch di scrittura vengono letti da Calvin::CONFIG.
 #
 # Il GitHubClient passato come `github:` ha già il repo_root corretto
 # (es. "backend/api"), quindi i file vengono scritti nel path giusto:
@@ -17,20 +18,23 @@
 #     model:         "codestral-latest",
 #     usage:         result[:usage],
 #     status:        :success,
-#     explore_turns: result[:explore_turns],
+#     explore_turns: result[:explore_turns],   # opzionale, specifico ExploreFlow
 #     temperature:   result[:temperature],
 #     files_written: result[:files_written],
-#     issue_length:  issue.body.to_s.length,
-#     test_pass_pct: nil
+#     issue_length:  issue.body.to_s.length,   # opzionale, specifico ExploreFlow
+#     test_pass_pct: nil                        # opzionale, futuro PrTestFixFlow
 #   )
 
 require "csv"
 
 module Calvin
   module RunReporter
-    REPORTS_DIR = ".calvin/reports"
-    CSV_PATH    = "#{REPORTS_DIR}/runs.csv"
-    MD_PATH     = "#{REPORTS_DIR}/runs.md"
+    # Path e branch letti da CONFIG — nessun valore hardcodato.
+    REPORTS_DIR    = Calvin::CONFIG.dig(:repo, :reports_dir)    || ".calvin/reports"
+    DEFAULT_BRANCH = Calvin::CONFIG.dig(:repo, :default_branch) || "main"
+
+    CSV_PATH = "#{REPORTS_DIR}/runs.csv"
+    MD_PATH  = "#{REPORTS_DIR}/runs.md"
 
     CSV_HEADER = %w[
       run_at workflow ref model
@@ -39,6 +43,8 @@ module Calvin
       temperature files_written issue_length
     ].freeze
 
+    # explore_turns, test_pass_pct, issue_length sono opzionali e specifici
+    # per singolo flow — vengono lasciati nil per i flow che non li producono.
     STATUS_EMOJI = {
       "success"   => "✅",
       "fixed"     => "✅",
@@ -93,9 +99,6 @@ module Calvin
 
       csv_content = CSV.generate(force_quotes: false) do |csv|
         csv << CSV_HEADER
-        # Normalise every row to CSV_HEADER.size columns so that rows written
-        # before new columns were added are padded with nil rather than left
-        # short, which would produce a jagged CSV unreadable by strict parsers.
         rows.each { |r| csv << r.fill(nil, r.size...CSV_HEADER.size) }
       end
 
@@ -107,7 +110,7 @@ module Calvin
           { path: MD_PATH,  content: md_content  }
         ],
         message: "chore: calvin run report — #{workflow} ref ##{ref}",
-        branch:  "main"
+        branch:  DEFAULT_BRANCH
       )
 
       Calvin::LOG.info "RunReporter: report aggiornato (#{CSV_PATH}) — #{rows.size} righe totali"
@@ -131,7 +134,6 @@ module Calvin
       sep    = "|------|----------|-----|-------|-----------|----------------|-----------|----------|--------|---------------|-------------|-------------|---------------|---------------|"
 
       table_rows = rows.map do |r|
-        # Pad to full width before destructuring so old short rows don't raise
         r = r.fill(nil, r.size...CSV_HEADER.size)
         run_at, workflow, ref, model, pt, ct, tt, cost, status,
           explore_turns, pct, temperature, files_written, issue_length = r

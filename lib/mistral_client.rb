@@ -14,11 +14,14 @@ require "json"
 
 module Calvin
   class MistralClient
-    API_URL       = URI("https://api.mistral.ai/v1/chat/completions")
-    DEFAULT_MODEL = ENV.fetch("CALVIN_MODEL", "codestral-latest")
+    API_URL = URI("https://api.mistral.ai/v1/chat/completions")
 
-    OPEN_TIMEOUT = 15
-    READ_TIMEOUT = 180
+    # Timeout letti da config — nessun valore hardcodato.
+    OPEN_TIMEOUT = Calvin::CONFIG.dig(:http, :open_timeout) || 15
+    READ_TIMEOUT = Calvin::CONFIG.dig(:http, :read_timeout) || 180
+
+    # Modello di default: prima ENV, poi config, poi stringa di sicurezza.
+    DEFAULT_MODEL = ENV.fetch("CALVIN_MODEL", Calvin::CONFIG.dig(:model, :default) || "codestral-latest")
 
     def initialize(api_key: ENV.fetch("MISTRAL_API_KEY"))
       @api_key    = api_key
@@ -26,7 +29,7 @@ module Calvin
       @max_tokens = @sampling[:max_tokens] || 8192
     end
 
-    # Singola chiamata — prompt testuale, usato da ImplementFlow e CiFixFlow
+    # Singola chiamata — prompt testuale
     def complete(prompt, temperature: default_temperature(:implement))
       complete_messages([{ role: "user", content: prompt }], temperature: temperature)
     end

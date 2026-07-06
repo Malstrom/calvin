@@ -8,7 +8,7 @@
 #   commit_and_pr  — branch + commit + PR
 #
 # Stack ("rails" | "flutter") determinato dalle label dell'issue.
-# Default: "rails".
+# Default letto da CONFIG[:repo][:stacks][:default].
 #
 # Ritorna:
 #   Success({ status: :success, pr_url:, branch:, files:, usage:, explore_turns: })
@@ -24,8 +24,9 @@ module Calvin
   class ExploreFlow
     include Dry::Transaction
 
-    KNOWN_STACKS  = %w[rails flutter].freeze
-    DEFAULT_STACK = "rails"
+    # Stacks e default letti da CONFIG — nessun valore hardcodato.
+    KNOWN_STACKS  = (Calvin::CONFIG.dig(:repo, :stacks, :known)  || %w[rails flutter]).map(&:to_s).freeze
+    DEFAULT_STACK = (Calvin::CONFIG.dig(:repo, :stacks, :default) || "rails").to_s.freeze
 
     step :build_prompt
     step :react_loop
@@ -66,25 +67,37 @@ module Calvin
       if files.empty?
         return Failure(step: :parse_files, error: "nessun FILE: block prodotto dal modello", usage: usage, explore_turns: explore_turns)
       end
-      description = FileParser.parse_pr_body(content)
-      Calvin::LOG.info "parse_files: #{files.size} file(s) — PR body: #{description ? 'trovato' : 'assente'}"
-      Success(github: github, issue: issue, files: files, usage: usage, description: description, explore_turns: explore_turns)
+
+      pr_body = FileParser.parse_pr_body(content)
+      Success(
+        github:        github,
+        issue:         issue,
+        files:         files,
+        pr_body:       pr_body,
+        usage:         usage,
+        explore_turns: explore_turns
+      )
+    rescue => e
+      Failure(step: :parse_files, error: e.message, usage: usage, explore_turns: explore_turns)
     end
 
-    def commit_and_pr(github:, issue:, files:, usage:, description:, explore_turns:)
-      CommitAndPr.call(
-        files:         files,
-        issue:         issue,
-        github:        github,
-        branch_prefix: "auto",
-        usage:         usage,
-        description:   description
-      ).fmap { |r| r.merge(status: :success, usage: usage, explore_turns: explore_turns) }
-       .or   { |f| Failure(f.merge(usage: usage, explore_turns: explore_turns)) }
+    def commit_and_pr(github:, issue:, files:, pr_body:, usage:, explore_turns:)
+      result = CommitAndPr.call(
+        files:       files,
+        issue:       issue,
+        github:      github,
+        usage:       usage,
+        description: pr_body
+      )
+      return Failure(result.failure.merge(explore_turns: explore_turns)) if result.failure?
+
+      Success(result.value!.merge(usage: usage, explore_turns: explore_turns, status: :success))
+    rescue => e
+      Failure(step: :commit_and_pr, error: e.message, usage: usage, explore_turns: explore_turns)
     end
 
     def detect_stack(issue)
-      labels = Array(issue.labels).map { |l| l.is_a?(String) ? l : l[:name].to_s.downcase }
+      labels = issue.labels.map(&:name)
       KNOWN_STACKS.find { |s| labels.include?(s) } || DEFAULT_STACK
     end
   end

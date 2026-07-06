@@ -4,14 +4,13 @@
 #
 # Non è più un mixin include — viene chiamato esplicitamente dai flow.
 # PrBodyBuilder costruisce il body della PR.
-# RubocopAutocorrect viene chiamato dall'orchestratore dopo questo step.
 #
 # Uso:
 #   Calvin::CommitAndPr.call(
 #     files:         [ {path:, content:} ],
 #     issue:         issue,
 #     github:        github_client,
-#     branch_prefix: "agent",     # opzionale, default "agent"
+#     branch_prefix: nil,          # opzionale — default letto da CONFIG
 #     usage:         hash | nil,
 #     description:   string | nil
 #   ) → Success({ pr_url:, branch:, files: }) | Failure({ step:, error: })
@@ -24,10 +23,14 @@ module Calvin
     include Dry::Monads[:result]
     extend self
 
-    def call(files:, issue:, github:, branch_prefix: "agent", usage: nil, description: nil)
+    # branch_prefix default letto da CONFIG — nessun valore hardcodato.
+    DEFAULT_BRANCH_PREFIX = (Calvin::CONFIG.dig(:repo, :branch_prefix) || "auto").freeze
+
+    def call(files:, issue:, github:, branch_prefix: nil, usage: nil, description: nil)
+      prefix    = branch_prefix || DEFAULT_BRANCH_PREFIX
       timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
       run_id    = ENV.fetch("GITHUB_RUN_ID", Time.now.to_i.to_s)
-      branch    = "#{branch_prefix}/issue-#{issue.number}-#{run_id}"
+      branch    = "#{prefix}/issue-#{issue.number}-#{run_id}"
 
       resolved = files.map do |f|
         { path: f[:path].gsub("[timestamp]", timestamp), content: f[:content] }

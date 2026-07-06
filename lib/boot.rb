@@ -8,21 +8,17 @@ require "base64"
 require "logger"
 require "yaml"
 
-# Calvin::CONFIG e Calvin::CONVENTIONS_PATH devono essere definiti PRIMA
-# di qualsiasi require_relative, perché le costanti di classe nei file
-# caricati vengono evaluate immediatamente al momento del require.
+# Calvin::CONFIG deve essere definito PRIMA di qualsiasi require_relative,
+# perché le costanti di classe nei file caricati vengono evaluate immediatamente.
 module Calvin
   CONFIG = YAML.safe_load_file(
     File.expand_path("../../config/calvin.yml", __FILE__),
     symbolize_names: true
   ).freeze
 
-  CONVENTIONS_PATH = ".calvin/conventions.md"
-
-  REPO_ROOTS = {
-    "rails"   => "backend/api",
-    "flutter" => "frontend/mobile"
-  }.freeze
+  # Lette da CONFIG — nessun valore hardcodato nel codice Ruby.
+  CONVENTIONS_PATH = CONFIG.dig(:repo, :conventions_path).freeze
+  REPO_ROOTS       = (CONFIG.dig(:repo, :roots) || {}).transform_keys(&:to_s).freeze
 end
 
 require_relative "github_client"
@@ -39,7 +35,7 @@ require_relative "react_loop"
 
 module Calvin
   REPO  = ENV.fetch("GITHUB_REPOSITORY")
-  MODEL = ENV.fetch("CALVIN_MODEL", "codestral-latest")
+  MODEL = ENV.fetch("CALVIN_MODEL", CONFIG.dig(:model, :default) || "codestral-latest")
   LOG   = Logger.new($stdout).tap do |l|
     l.formatter = proc { |sev, _, _, msg| "[calvin] #{sev}: #{msg}\n" }
   end
