@@ -10,8 +10,17 @@ require "dry/monads"
 require "dry/transaction"
 
 module Calvin
-  # Logger
-  LOG = Logger.new($stdout).tap { |l| l.progname = "calvin" }
+  # Logger con formatter leggibile:
+  #   13:16:01  INFO  labels: rails, feature, calvin
+  #   13:16:01  WARN  JSON parse failed
+  LOG = Logger.new($stdout).tap do |l|
+    l.progname = "calvin"
+    l.formatter = proc do |severity, time, _progname, msg|
+      ts    = time.strftime("%H:%M:%S")
+      level = severity.ljust(4)
+      "#{ts}  #{level}  #{msg}\n"
+    end
+  end
 
   # Config centralizzata — unica fonte di verità per tutti i parametri.
   # DEVE essere definita prima di qualsiasi require_relative che usa Calvin::CONFIG.

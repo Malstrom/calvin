@@ -10,19 +10,22 @@ module Calvin
     MIGRATIONS_PATH = "db/migrate"
 
     def self.build(issue, github_client: nil)
-      title   = issue.title.to_s.strip
-      body    = issue.body.to_s.strip
+      title = issue.title.to_s.strip
+      body  = issue.body.to_s.strip
+
+      raise "Issue ##{issue.number}: title e body vuoti." if title.empty? && body.empty?
+
+      Calvin::LOG.info "--- issue ##{issue.number} context ---"
+      Calvin::LOG.info "  title : #{title}"
+      Calvin::LOG.info "  body  : #{body.empty? ? '(vuoto)' : body[0..120].gsub("\n", " ")}"
+      Calvin::LOG.info "  bytes : #{(title + body).bytesize}"
+
       content = [title, body].reject(&:empty?).join("\n\n")
-
-      raise "Issue ##{issue.number}: title e body vuoti." if content.empty?
-
-      Calvin::LOG.info "context_builder: issue ##{issue.number} (#{content.bytesize} bytes)"
-      Calvin::LOG.info "context_builder: prompt[:20] = #{content[0..19].inspect}"
 
       if github_client
         next_version = next_migration_version(github_client)
         content = "NEXT_MIGRATION_VERSION: #{next_version}\n\n#{content}"
-        Calvin::LOG.info "context_builder: NEXT_MIGRATION_VERSION=#{next_version}"
+        Calvin::LOG.info "  migration_version : #{next_version}"
       end
 
       content
@@ -33,7 +36,6 @@ module Calvin
     # Fallback: usa Time.now.utc formattato.
     def self.next_migration_version(github_client)
       entries = github_client.list_directory(MIGRATIONS_PATH)
-      # I file di migrazione hanno formato: 20240715120000_nome.rb
       timestamps = entries
         .map    { |f| f.match(/\A(\d{14})_/)&.captures&.first }
         .compact
