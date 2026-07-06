@@ -33,8 +33,8 @@ flowchart TD
     subgraph CI ["⚙️ CI Synca (GitHub Actions)"]
         O --> P["CI runs: tests, Brakeman, bundler-audit"]
         P --> Q{"CI passa?"}
-        Q -- Sì ✅ --> R["Commento bot ci-report\n✅ all green"]
-        Q -- No ❌ --> S["Commento bot ci-report\n❌ errori + backtrace"]
+        Q -- Sì --> R["Commento bot ci-report\n✅ all green"]
+        Q -- No --> S["Commento bot ci-report\n❌ errori + backtrace"]
     end
 
     subgraph REVIEW ["🔁 Calvin — PrReviewFlow"]
@@ -49,8 +49,8 @@ flowchart TD
 
     subgraph MERGE ["✅ Review umana e merge"]
         R --> Z["Igor revisiona la PR"]
-        Z --> AA{"Approvato?"]
-        AA -- No, note --> BB["scenario: review_pr\ncommento con osservazioni"]
+        Z --> AA{"Approvato?"}
+        AA -- No --> BB["scenario: review_pr\ncommento con osservazioni"]
         BB --> CC["Igor o Calvin correggono manualmente"]
         CC --> P
         AA -- Sì --> DD["Igor spunta checkbox Approved\nnella PR"]
