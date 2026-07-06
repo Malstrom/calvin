@@ -11,10 +11,10 @@ require_relative "../lib/boot"
 # ── Post-steps uniformi per tutti i flow ────────────────────────────────────────────────────
 def run_post_steps(result, github:, workflow:, ref:, extra: {})
   if result.success?
-    r = result.value!
+    r = result.value!  # Calvin::FlowResult
     Calvin::RubocopAutocorrect.run(
-      files:  r[:files]  || [],
-      branch: r[:branch] || "",
+      files:  r.files  || [],
+      branch: r.branch || "",
       github: github
     )
     Calvin::RunReporter.write(
@@ -22,11 +22,11 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
       workflow:      workflow,
       ref:           ref,
       model:         Calvin::MODEL,
-      usage:         r[:usage],
-      status:        r[:status] || :success,
-      explore_turns: r[:explore_turns],
-      temperature:   r[:temperature],
-      files_written: Array(r[:files]).size,
+      usage:         r.usage,
+      status:        r.status,
+      explore_turns: r.meta(:explore_turns),   # nil se flow diverso da ExploreFlow
+      temperature:   r.temperature,
+      files_written: Array(r.files).size,
       issue_length:  extra[:issue]&.body.to_s.length
     )
   else
@@ -47,7 +47,7 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
       model:         Calvin::MODEL,
       usage:         err[:usage],
       status:        err[:status] || :failure,
-      explore_turns: err[:explore_turns],
+      explore_turns: err[:explore_turns],      # nil se flow diverso da ExploreFlow
       temperature:   err[:temperature],
       files_written: nil,
       issue_length:  extra[:issue]&.body.to_s.length
@@ -55,7 +55,7 @@ def run_post_steps(result, github:, workflow:, ref:, extra: {})
   end
 end
 
-# ── Fetch issue ──────────────────────────────────────────────────────────────────────────────────────
+# ── Fetch issue ────────────────────────────────────────────────────────────────────────────────────
 temp_github = Calvin::GitHubClient.new
 issue       = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
 labels      = issue.labels.map(&:name)

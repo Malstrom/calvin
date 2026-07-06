@@ -10,15 +10,10 @@
 # Stack ("rails" | "flutter") determinato dalle label dell'issue.
 # Default letto da CONFIG[:repo][:stacks][:default].
 #
-# Contratto risultato (per run_post_steps + reporter):
-#   Success({
-#     files:         Array<Hash>,   # [{ path:, content: }]
-#     branch:        String,
-#     status:        Symbol,       # :success | :failure | :partial
-#     usage:         Hash | nil,
-#     temperature:   Float | nil,
-#     explore_turns: Integer | nil # specifico di ExploreFlow
-#   })
+# Contratto risultato:
+#   Success(Calvin::FlowResult) con:
+#     files, branch, status, usage, temperature, pr_url
+#     flow_meta: { explore_turns: Integer }
 #   Failure({ step:, error:, usage:, explore_turns: })
 
 require "dry/transaction"
@@ -31,7 +26,6 @@ module Calvin
   class ExploreFlow
     include Dry::Transaction
 
-    # Stacks e default letti da CONFIG — nessun valore hardcodato.
     KNOWN_STACKS  = (Calvin::CONFIG.dig(:repo, :stacks, :known)  || %w[rails flutter]).map(&:to_s).freeze
     DEFAULT_STACK = (Calvin::CONFIG.dig(:repo, :stacks, :default) || "rails").to_s.freeze
 
@@ -98,14 +92,15 @@ module Calvin
       )
       return Failure(result.failure.merge(explore_turns: explore_turns)) if result.failure?
 
-      value = result.value!
+      v = result.value!
       Success(
-        files:         value[:files],
-        branch:        value[:branch],
-        status:        :success,
-        usage:         usage,
-        temperature:   value[:temperature],
-        explore_turns: explore_turns
+        Calvin::FlowResult.success(
+          files:       v[:files],
+          branch:      v[:branch],
+          pr_url:      v[:pr_url],
+          usage:       usage,
+          flow_meta:   { explore_turns: explore_turns }
+        )
       )
     rescue => e
       Failure(step: :commit_and_pr, error: e.message, usage: usage, explore_turns: explore_turns)
