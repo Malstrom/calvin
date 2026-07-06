@@ -163,11 +163,15 @@ module Calvin
     end
 
     def fetch_snippet(target, ref:)
-      content = @github.get_file_content(target[:path], ref: ref)
-      unless content
+      raw_content = @github.get_file_content(target[:path], ref: ref)
+      unless raw_content
         Calvin::LOG.warn "PrReviewFlow: file non trovato su branch #{ref}: #{target[:path]}"
         return nil
       end
+
+      # Base64.decode64 ritorna ASCII-8BIT — forza UTF-8 per evitare
+      # incompatible encoding errors nel join del prompt
+      content = raw_content.force_encoding("UTF-8")
 
       lines      = content.lines
       center     = target[:line] - 1
