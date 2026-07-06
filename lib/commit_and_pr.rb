@@ -45,8 +45,11 @@ module Calvin
         branch:  branch
       )
 
+      issue_url = "https://github.com/#{Calvin::REPO}/issues/#{issue.number}"
+      pr_title  = "[Calvin] #{issue.title} — #{issue_url}"
+
       pr = github.create_pull_request(
-        title: "[Agent] #{issue.title}",
+        title: pr_title,
         body:  PrBodyBuilder.build(issue: issue, usage: usage, description: description),
         head:  branch
       )
