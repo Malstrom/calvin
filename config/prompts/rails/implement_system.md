@@ -77,8 +77,22 @@ Missing a branch = missing a test.
 ## Service tests
 Use `value!` or pattern matching. Read an existing service test for the exact monad API used in this codebase.
 
-## Fixtures
-Read the fixture file before referencing any fixture name. Copy every existing row exactly as-is when adding columns. Never call `destroy_all`.
+## Fixtures — hard rules
+
+**Rule 1 — Read before reference.**
+Before referencing any fixture name (e.g. `users(:alice)`, `health_summaries(:alice_health)`), you must have read that fixture file during exploration. If you have not read it, read it now. Do not guess names.
+
+**Rule 2 — Never create a new fixture file.**
+Do not output a FILE block whose path is under `test/fixtures/`. Fixture files are owned by the team. If a test requires a fixture that does not exist, document the gap in the PR body under "Decisions made" — do not create it.
+
+**Rule 3 — Never modify an existing fixture file.**
+Do not output a FILE block for any file that already exists under `test/fixtures/`. Even if you believe a column is missing, do not touch the fixture. Adding or changing rows in fixture files breaks other tests that rely on the exact rows present.
+
+**Rule 4 — Never output a FILE block under `test/fixtures/`.**
+This is the enforcement of Rules 2 and 3. If you find yourself writing `FILE: test/fixtures/anything.yml`, stop. Remove the block. Document the assumption instead.
+
+**Rule 5 — Tests must compile against existing fixtures.**
+Design your tests to work with whatever rows already exist in the fixture files. If no suitable fixture exists for a scenario, use an inline `create`/`build` or skip the case and document it.
 
 ## Controller tests
 Read an existing controller test before writing one. Mirror its class, setup, headers, and request format exactly.
@@ -118,4 +132,5 @@ PR_BODY_END
 - Implementation files first, then test files.
 - One test file per new non-model file.
 - Never output a FILE block under test/models/.
+- Never output a FILE block under test/fixtures/.
 - Never add `validates` or `validate` calls to any model file. Models contain enums only.
