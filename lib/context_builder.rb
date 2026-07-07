@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 # Costruisce il prompt per il ReActLoop.
 #
-# Unica fonte: title + body dell'issue.
-# Inietta NEXT_MIGRATION_VERSION leggendo l'ultima migrazione
-# dal repo target — il modello non deve mai inventarsi un timestamp.
+# Fonti:
+#   1. title + body dell'issue
+#   2. NEXT_MIGRATION_VERSION (letto dal repo target)
+#   3. chunk RAG da Supabase via ContextRetriever (graceful fallback se non configurato)
 
 module Calvin
   class ContextBuilder
@@ -27,6 +28,9 @@ module Calvin
         content = "NEXT_MIGRATION_VERSION: #{next_version}\n\n#{content}"
         Calvin::LOG.info "  migration_version : #{next_version}"
       end
+
+      retrieved = Calvin::ContextRetriever.call(issue)
+      content   = [content, retrieved].compact.join("\n\n") if retrieved
 
       content
     end
