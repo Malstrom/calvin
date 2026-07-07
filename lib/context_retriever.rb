@@ -31,11 +31,18 @@ module Calvin
       return nil unless supabase_configured?
 
       query     = build_query(issue)
+      Calvin::LOG.info "ContextRetriever: query = #{query[0..120]}..."
+
       embedding = embed(query)
       chunks    = search(embedding)
-      return nil if chunks.empty?
+
+      if chunks.empty?
+        Calvin::LOG.info "ContextRetriever: nessun chunk trovato"
+        return nil
+      end
 
       Calvin::LOG.info "ContextRetriever: #{chunks.size} chunk(s) recuperati"
+      log_chunks(chunks)
       format_chunks(chunks)
     rescue => e
       Calvin::LOG.warn "ContextRetriever: fallback silenzioso (#{e.message})"
@@ -89,6 +96,20 @@ module Calvin
       raise "Supabase RPC error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
       JSON.parse(resp.body)
+    end
+
+    def log_chunks(chunks)
+      Calvin::LOG.info "ContextRetriever: ===== CHUNK RETRIEVED ====="
+      chunks.each_with_index do |chunk, i|
+        source_type = chunk["source_type"] || "doc"
+        source_path = chunk["source_path"] || "unknown"
+        similarity  = chunk["similarity"] ? format("%.4f", chunk["similarity"]) : "n/a"
+        content     = chunk["content"].to_s.strip
+        Calvin::LOG.info "ContextRetriever: [#{i + 1}/#{chunks.size}] #{source_type}:#{source_path} (similarity=#{similarity})"
+        Calvin::LOG.info "ContextRetriever: #{content}"
+        Calvin::LOG.info "ContextRetriever: -----"
+      end
+      Calvin::LOG.info "ContextRetriever: ===== END CHUNKS ====="
     end
 
     def format_chunks(chunks)
