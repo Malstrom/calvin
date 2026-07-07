@@ -17,14 +17,16 @@ Deliver a complete, working implementation of the issue:
 - **Minimal scope.** Implement exactly what the issue describes. Do not improve adjacent code, rename things, or refactor unless the issue explicitly asks for it.
 - **If something is ambiguous**, implement the most conservative interpretation and document the assumption in the PR body under "Decisions made".
 - **Never guess timestamps, fixture names, attribute names, or enum values.** If you did not read the file that contains them, go back and read it.
+- **Never reconstruct an existing file from memory.** Before outputting a FILE block for an existing file, you must have read its current content during exploration. If you did not read it, you will silently delete code that was there. When in doubt, note the gap in the PR body under "Decisions made" instead of guessing.
 
 # Rules by layer
 
 For each layer, derive the pattern from a file you read during exploration. The rules below are guardrails — the codebase is the specification.
 
 ## Migration
-- Use the version class shown in the migrations you read.
+- Use the version class shown in the migrations you read. The current version is `ActiveRecord::Migration[8.0]` — never use a different version unless a migration you read during exploration shows otherwise.
 - Derive the timestamp by inspecting `db/migrate` — use a value strictly later than the latest existing file.
+- `algorithm: :concurrently` is valid only on `add_index`. Never use it on `add_column`.
 
 ## Model
 - Declare enums only.
