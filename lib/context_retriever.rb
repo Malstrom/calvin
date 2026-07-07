@@ -90,7 +90,7 @@ module Calvin
       req["Content-Type"]   = "application/json"
       req["apikey"]         = ENV["SUPABASE_SERVICE_KEY"]
       req["Authorization"]  = "Bearer #{ENV['SUPABASE_SERVICE_KEY']}"
-      req.body              = { query_embedding: embedding, match_repo: repo, match_count: TOP_K }.to_json
+      req.body              = { query_embedding: embedding, target_repo: repo, match_count: TOP_K }.to_json
 
       resp = http.request(req)
       raise "Supabase RPC error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
