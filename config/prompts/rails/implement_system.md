@@ -50,6 +50,9 @@ For each layer, derive the pattern from a file you read during exploration. The 
 
 ## Service
 - Return `Success(record)` or `Failure([:reason, detail])`. Read an existing service before writing one.
+- **The service returns the record or a plain value object — never a pre-shaped JSON hash.**
+  JSON shaping is the serializer’s responsibility. A service that returns
+  `{ chronotype_label: ..., peak_energy_window: ... }` is doing the serializer’s job.
 - **When using `case/when` with numeric ranges, always use exclusive-end ranges (`...`) for lower
   bounds to avoid boundary ambiguity.** A value exactly on a boundary matches the first `when` clause
   it appears in — with inclusive ranges (`..`) the same value matches two clauses and the second is
@@ -62,6 +65,30 @@ For each layer, derive the pattern from a file you read during exploration. The 
   end
   ```
 
+## Serializer
+- **Every JSON response that exposes model or computed data must go through an Alba serializer.**
+  Never build a response hash inside a service or controller.
+- Read an existing serializer before writing one. All serializers live in `app/serializers/` and
+  follow this structure:
+  ```
+  class SignalsSummarySerializer
+    include Alba::Resource
+
+    attributes :plain_attribute          # direct model attribute
+    attribute(:computed_field) { |obj| obj.some_method }  # computed
+  end
+  ```
+- The controller instantiates the serializer and passes it to `render_success`:
+  ```
+  render_success(SignalsSummarySerializer.new(record).as_json)
+  ```
+- Serializers do **not** receive hashes — they receive ActiveRecord objects or plain Ruby objects
+  that respond to the methods declared in `attribute` blocks.
+- One serializer per resource. If a response nests a sub-resource, compose serializers:
+  ```
+  attribute(:preference_profile) { |obj| PreferencesSerializer.new(obj.preference_profile).as_json }
+  ```
+
 ## Controller
 - Use the response helpers and pattern matching style shown in the controllers you read.
 - Extract params using the pattern shown in adjacent controllers.
@@ -71,7 +98,7 @@ For each layer, derive the pattern from a file you read during exploration. The 
   ```
   case SomeService.call(...)
   in Success[result]
-    render_success({ key: result })
+    render_success(SomeSerializer.new(result).as_json)
   in Failure[:reason, message]
     render_error(:reason, message)
   end
