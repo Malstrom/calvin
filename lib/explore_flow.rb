@@ -4,6 +4,7 @@
 #
 #   build_prompt      — ContextBuilder costruisce il prompt dal title+body dell'issue
 #   retrieve_context  — ContextRetriever: query RAG su Supabase, arricchisce il prompt
+#                       (DISABILITATO — vedi commento nello step)
 #   react_loop        — ReActLoop: il modello esplora e implementa
 #   parse_files       — estrae FILE: blocks e PR_BODY
 #   commit_and_pr     — branch + commit + PR
@@ -50,10 +51,18 @@ module Calvin
       Failure(step: :build_prompt, error: e.message, usage: nil, explore_turns: nil)
     end
 
+    # TODO: RAG disabilitato temporaneamente.
+    # Il contesto vettoriale veniva iniettato nel prompt prima della fase ReAct,
+    # ma i chunk recuperati (docs/architecture, ios-setup, ml-architecture, ecc.)
+    # non aggiungono valore utile rispetto a ciò che il modello scopre autonomamente
+    # leggendo il repo via read_file/list_dir durante l'esplorazione.
+    # Da rivalutare quando il DB vettoriale conterrà chunk di codice sorgente
+    # (controllers, services, serializers) invece di sola documentazione.
     def retrieve_context(github:, issue:, prompt:)
-      context = ContextRetriever.call(issue)
-      enriched = context ? "#{context}\n\n#{prompt}" : prompt
-      Success(github: github, issue: issue, prompt: enriched)
+      # context = ContextRetriever.call(issue)
+      # enriched = context ? "#{context}\n\n#{prompt}" : prompt
+      Calvin::LOG.info "retrieve_context: RAG disabilitato, prompt invariato"
+      Success(github: github, issue: issue, prompt: prompt)
     rescue => e
       Calvin::LOG.warn "retrieve_context: errore non fatale (#{e.message}), continuo senza RAG"
       Success(github: github, issue: issue, prompt: prompt)
@@ -82,7 +91,7 @@ module Calvin
       end
 
       Calvin::LOG.info "parse_files: #{files.size} file(s) generati da Codestral:"
-      files.each { |f| Calvin::LOG.info "  → #{f[:path]}" }
+      files.each { |f| Calvin::LOG.info "  \u2192 #{f[:path]}" }
 
       pr_body = FileParser.parse_pr_body(content)
       Success(
