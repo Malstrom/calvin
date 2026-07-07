@@ -30,6 +30,7 @@ For each layer, derive the pattern from a file you read during exploration. The 
 
 ## Model
 - Declare enums only.
+- Use keyword-first enum syntax: `enum :field_name, { value: 0 }`. Never use hash-rocket syntax: `enum field_name: { value: 0 }` — it raises ArgumentError on Rails 7+.
 - **Never add validations.** All validation lives in the contract layer (dry-validation). If a contract does not exist yet, create it — do not move validation into the model.
 
 ## Contract
