@@ -66,10 +66,11 @@ module Calvin
       http.open_timeout = OPEN_TIMEOUT
       http.read_timeout = READ_TIMEOUT
 
-      req                  = Net::HTTP::Post.new(EMBED_URL)
-      req["Content-Type"]  = "application/json"
-      req["Authorization"] = "Bearer #{ENV.fetch('MISTRAL_API_KEY')}"
-      req.body             = { model: EMBED_MODEL, input: [text] }.to_json
+      req                       = Net::HTTP::Post.new(EMBED_URL)
+      req["Content-Type"]       = "application/json"
+      req["Authorization"]      = "Bearer #{ENV.fetch('MISTRAL_API_KEY')}"
+      req["Accept-Encoding"]    = "identity"
+      req.body                  = { model: EMBED_MODEL, input: [text] }.to_json
 
       resp = http.request(req)
       raise "Mistral embed error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
@@ -86,11 +87,12 @@ module Calvin
       http.open_timeout = OPEN_TIMEOUT
       http.read_timeout = READ_TIMEOUT
 
-      req                   = Net::HTTP::Post.new(url)
-      req["Content-Type"]   = "application/json"
-      req["apikey"]         = ENV["SUPABASE_SERVICE_KEY"]
-      req["Authorization"]  = "Bearer #{ENV['SUPABASE_SERVICE_KEY']}"
-      req.body              = { query_embedding: embedding, target_repo: repo, match_count: TOP_K }.to_json
+      req                       = Net::HTTP::Post.new(url)
+      req["Content-Type"]       = "application/json"
+      req["apikey"]             = ENV["SUPABASE_SERVICE_KEY"]
+      req["Authorization"]      = "Bearer #{ENV['SUPABASE_SERVICE_KEY']}"
+      req["Accept-Encoding"]    = "identity"
+      req.body                  = { query_embedding: embedding, target_repo: repo, match_count: TOP_K }.to_json
 
       resp = http.request(req)
       raise "Supabase RPC error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
