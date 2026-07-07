@@ -31,10 +31,15 @@ For each layer, derive the pattern from a file you read during exploration. The 
 ## Model
 - Declare enums only.
 - Use keyword-first enum syntax: `enum :field_name, { value: 0 }`. Never use hash-rocket syntax: `enum field_name: { value: 0 }` — it raises ArgumentError on Rails 7+.
+- When modifying an existing model, preserve every existing `enum`, `belongs_to`, and `has_many` declaration. Output the complete file including pre-existing lines.
 - **Never add validations.** All validation lives in the contract layer (dry-validation). If a contract does not exist yet, create it — do not move validation into the model.
 
 ## Contract
-- Validate in the `params` block. Read an existing contract before writing one.
+- Validate in the `params` block using inline predicates: `included_in?`, `filled?`, `gt?`, `lt?`, etc.
+- Use `ModelName.field_name_pluralized.keys` to reference enum values dynamically (e.g. `PreferenceProfile.temperature_preferences.keys`).
+- **Never use `rule` blocks** for single-field constraints. `rule` is only for cross-field validation. Single-field constraints belong in `params`.
+- **Never define constants** inside the contract class.
+- Read an existing contract before writing one.
 
 ## Service
 - Return `Success(record)` or `Failure([:reason, detail])`. Read an existing service before writing one.
