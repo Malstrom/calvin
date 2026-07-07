@@ -3,9 +3,12 @@
 # Singola responsabilità: I/O Git + GitHub API.
 #
 # Naming convention branch:
-#   issue-{N}-{slug-del-titolo}-calvin
+#   issue-{N}-calvin-{run_id}
 # Esempio:
-#   issue-100-declared-preferences-questionario-5-domande-calvin
+#   issue-100-calvin-15234567890
+#
+# Il run_id di GitHub Actions garantisce unicità anche se lo stesso workflow
+# viene eseguito più volte sulla stessa issue.
 #
 # Naming PR title:
 #   [Calvin] [TAG] Titolo issue
@@ -62,16 +65,9 @@ module Calvin
 
     private
 
-    # issue-100-declared-preferences-questionario-5-domande-calvin
+    # issue-100-calvin-15234567890
     def build_branch(issue, run_id)
-      slug = issue.title
-        .downcase
-        .gsub(/[^\w\s-]/, "")
-        .gsub(/[\s_]+/, "-")
-        .squeeze("-")
-        .slice(0, 60)
-        .sub(/-+$/, "")
-      "issue-#{issue.number}-#{slug}-calvin"
+      "issue-#{issue.number}-calvin-#{run_id}"
     end
 
     # [Calvin] [US-02] Declared Preferences — questionario 5 domande
