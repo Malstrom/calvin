@@ -19,6 +19,38 @@ Deliver a complete, working implementation of the issue:
 - **Never guess timestamps, fixture names, attribute names, or enum values.** If you did not read the file that contains them, go back and read it.
 - **Never reconstruct an existing file from memory.** Before outputting a FILE block for an existing file, you must have read its current content during exploration. If you did not read it, you will silently delete code that was there. When in doubt, note the gap in the PR body under "Decisions made" instead of guessing.
 
+# Architecture rule — the controller/service/serializer triad
+
+Every controller action that returns data must have exactly three collaborators:
+
+```
+Controller  →  calls  →  Service       (produces the record / value object)
+                    →  Serializer    (shapes the JSON from the record)
+```
+
+**The controller contains no business logic and no JSON shaping.** Its only job is:
+1. Authenticate / authorize
+2. Call the service with params
+3. Pattern-match on the result
+4. Pass the record to the serializer
+5. Render
+
+If you find yourself writing computation, string building, or hash construction inside a controller action or a service's return value, stop — that code belongs in the serializer.
+
+A correct controller action looks like this:
+```ruby
+def show
+  case SomeService.call(user: current_user)
+  in Success[record]
+    render_success(SomeSerializer.new(record).as_json)
+  in Failure[:not_found, message]
+    render_error(:not_found, message)
+  end
+end
+```
+
+Nothing else belongs in the action body.
+
 # Rules by layer
 
 For each layer, derive the pattern from a file you read during exploration. The rules below are guardrails — the codebase is the specification.
@@ -51,8 +83,8 @@ For each layer, derive the pattern from a file you read during exploration. The 
 ## Service
 - Return `Success(record)` or `Failure([:reason, detail])`. Read an existing service before writing one.
 - **The service returns the record or a plain value object — never a pre-shaped JSON hash.**
-  JSON shaping is the serializer’s responsibility. A service that returns
-  `{ chronotype_label: ..., peak_energy_window: ... }` is doing the serializer’s job.
+  JSON shaping is the serializer's responsibility. A service that returns
+  `{ chronotype_label: ..., peak_energy_window: ... }` is doing the serializer's job.
 - **When using `case/when` with numeric ranges, always use exclusive-end ranges (`...`) for lower
   bounds to avoid boundary ambiguity.** A value exactly on a boundary matches the first `when` clause
   it appears in — with inclusive ranges (`..`) the same value matches two clauses and the second is
@@ -70,7 +102,7 @@ For each layer, derive the pattern from a file you read during exploration. The 
   Never build a response hash inside a service or controller.
 - Read an existing serializer before writing one. All serializers live in `app/serializers/` and
   follow this structure:
-  ```
+  ```ruby
   class SignalsSummarySerializer
     include Alba::Resource
 
@@ -79,13 +111,17 @@ For each layer, derive the pattern from a file you read during exploration. The 
   end
   ```
 - The controller instantiates the serializer and passes it to `render_success`:
-  ```
+  ```ruby
   render_success(SignalsSummarySerializer.new(record).as_json)
   ```
 - Serializers do **not** receive hashes — they receive ActiveRecord objects or plain Ruby objects
   that respond to the methods declared in `attribute` blocks.
+- **Every method called on `obj` inside an `attribute` block must exist on the model.** Before
+  writing `obj.some_method`, verify that method exists by checking either the model's serializer
+  (if one was read during exploration) or the model file itself. Never call a method you have not
+  confirmed exists.
 - One serializer per resource. If a response nests a sub-resource, compose serializers:
-  ```
+  ```ruby
   attribute(:preference_profile) { |obj| PreferencesSerializer.new(obj.preference_profile).as_json }
   ```
 
@@ -95,12 +131,12 @@ For each layer, derive the pattern from a file you read during exploration. The 
 - **Never call `.value!` directly in a controller action.** `.value!` raises
   `Dry::Monads::UnwrapError` on any `Failure` result — it is never safe in a controller.
   Always unwrap monads with `case/in` pattern matching:
-  ```
+  ```ruby
   case SomeService.call(...)
   in Success[result]
     render_success(SomeSerializer.new(result).as_json)
   in Failure[:reason, message]
-    render_error(:reason, message)
+    render_error(reason, message)
   end
   ```
   `.value!` is allowed only in test files (service tests) where a failure is an explicit test bug.
@@ -156,8 +192,37 @@ Design your tests to work with whatever rows already exist in the fixture files.
 ## Controller tests
 Read an existing controller test before writing one. Mirror its class, setup, headers, and request format exactly.
 
+**Never assert on hardcoded string or integer values derived from fixtures.** Instead, read the
+value from the fixture object and assert against it:
+```ruby
+# Wrong — brittle, breaks when fixture changes
+assert_equal "06:00–08:00", response.parsed_body.dig("summary", "peak_energy_window")
+assert_equal 437, response.parsed_body.dig("summary", "avg_sleep_duration_minutes")
+
+# Correct — derives expected value from the same source as the code
+expected_window = "#{@health_summary.peak_energy_start_local}–#{@health_summary.peak_energy_end_local}"
+assert_equal expected_window, response.parsed_body.dig("summary", "peak_energy_window")
+
+# Correct — I18n key, not raw string
+assert_equal I18n.t("self_report_alignment.note", self_chronotype: "night", chronotype: @health_summary.chronotype),
+             response.parsed_body.dig("summary", "self_report_alignment", "note")
+```
+
 ## Never write model tests
 `test/models/` files are not produced by this flow. Model logic is covered by contract and service tests.
+
+# Pre-output checklist
+
+Before emitting any FILE block, verify every item:
+
+- [ ] Every method called on a model object inside a serializer `attribute` block exists — confirmed by reading the model's serializer or the model file during exploration.
+- [ ] Every fixture label referenced in tests (`users(:alice)`) was read from the fixture file during exploration — not guessed.
+- [ ] No test asserts a hardcoded string or integer value that came from a fixture — use the fixture object's attribute instead.
+- [ ] Every I18n key used in tests uses `I18n.t(...)`, never a raw English string.
+- [ ] No `validates` or `validate` in any model file.
+- [ ] No response hash built in a service or controller — the serializer shapes JSON.
+- [ ] The controller action contains only: auth check, service call, pattern match, serializer call, render. Nothing else.
+- [ ] The service returns a record or value object — never a hash with display strings.
 
 # Output Format
 
