@@ -14,6 +14,10 @@ on:
         required: true
       MISTRAL_API_KEY:
         required: false
+      SUPABASE_URL:
+        required: false
+      SUPABASE_SERVICE_KEY:
+        required: false
 
 jobs:
   calvin:
@@ -60,4 +64,6 @@ jobs:
           GITHUB_REPOSITORY: ${{ inputs.target_repo }}
           GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CALVIN_MODEL: codestral-latest
