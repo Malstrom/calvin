@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 # Flusso Calvin — triggerato dalla label 'calvin'.
-# Pipeline dry-transaction con 4 step espliciti:
+# Pipeline dry-transaction con 5 step espliciti:
 #
-#   build_prompt   — ContextBuilder costruisce il prompt dal title+body dell'issue
-#   react_loop     — ReActLoop: il modello esplora e implementa
-#   parse_files    — estrae FILE: blocks e PR_BODY
-#   commit_and_pr  — branch + commit + PR
+#   build_prompt      — ContextBuilder costruisce il prompt dal title+body dell'issue
+#   retrieve_context  — ContextRetriever: query RAG su Supabase, arricchisce il prompt
+#   react_loop        — ReActLoop: il modello esplora e implementa
+#   parse_files       — estrae FILE: blocks e PR_BODY
+#   commit_and_pr     — branch + commit + PR
 #
 # Stack ("rails" | "flutter") determinato dalle label dell'issue.
 # Default letto da CONFIG[:repo][:stacks][:default].
@@ -18,6 +19,7 @@
 
 require "dry/transaction"
 require_relative "context_builder"
+require_relative "context_retriever"
 require_relative "file_parser"
 require_relative "react_loop"
 require_relative "commit_and_pr"
@@ -30,6 +32,7 @@ module Calvin
     DEFAULT_STACK = (Calvin::CONFIG.dig(:repo, :stacks, :default) || "rails").to_s.freeze
 
     step :build_prompt
+    step :retrieve_context
     step :react_loop
     step :parse_files
     step :commit_and_pr
@@ -45,6 +48,15 @@ module Calvin
       Success(github: github, issue: issue, prompt: prompt)
     rescue => e
       Failure(step: :build_prompt, error: e.message, usage: nil, explore_turns: nil)
+    end
+
+    def retrieve_context(github:, issue:, prompt:)
+      context = ContextRetriever.call(issue)
+      enriched = context ? "#{context}\n\n#{prompt}" : prompt
+      Success(github: github, issue: issue, prompt: enriched)
+    rescue => e
+      Calvin::LOG.warn "retrieve_context: errore non fatale (#{e.message}), continuo senza RAG"
+      Success(github: github, issue: issue, prompt: prompt)
     end
 
     def react_loop(github:, issue:, prompt:)
@@ -69,7 +81,6 @@ module Calvin
         return Failure(step: :parse_files, error: "nessun FILE: block prodotto dal modello", usage: usage, explore_turns: explore_turns)
       end
 
-      # Log dei path prodotti da Codestral — visibili prima del commit
       Calvin::LOG.info "parse_files: #{files.size} file(s) generati da Codestral:"
       files.each { |f| Calvin::LOG.info "  → #{f[:path]}" }
 
