@@ -241,14 +241,24 @@ module Calvin
       "ERROR: #{e.message}"
     end
 
+    # Estrae e parsa il primo oggetto JSON completo dalla risposta del modello.
+    # Gestisce sia JSON su singola riga che multi-riga (flag /m).
     def parse_action(raw)
       cleaned = raw.strip
                    .gsub(/\A```(?:json)?\n?/, "")
                    .gsub(/\n?```\z/, "")
-                   .lines
-                   .find { |l| l.strip.start_with?("{") }&.strip
-      return nil unless cleaned
-      JSON.parse(cleaned)
+
+      # Tentativo 1: il contenuto è già JSON valido (caso single-line o blocco pulito)
+      if cleaned.strip.start_with?("{")
+        return JSON.parse(cleaned.strip)
+      end
+
+      # Tentativo 2: estrae il primo blocco {...} bilanciato con dotall
+      if (m = cleaned.match(/(\{.+\})/m))
+        return JSON.parse(m[1])
+      end
+
+      nil
     rescue JSON::ParserError => e
       Calvin::LOG.warn "ReAct JSON error: #{e.message}"
       nil
