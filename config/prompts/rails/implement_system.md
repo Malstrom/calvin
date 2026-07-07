@@ -40,6 +40,13 @@ For each layer, derive the pattern from a file you read during exploration. The 
 - **Never use `rule` blocks** for single-field constraints. `rule` is only for cross-field validation. Single-field constraints belong in `params`.
 - **Never define constants** inside the contract class.
 - Read an existing contract before writing one.
+- **Error message strings go in `config/locales/contracts.en.yml`**, never inline in the contract or test.
+  Keys are organized by field name, not by contract class: `contracts.errors.<field_name>.<rule_name>`
+  — e.g. `contracts.errors.activity_level.inclusion`.
+  When adding a new field validation, add the corresponding key to that file.
+  Read the file before modifying it — never overwrite existing keys.
+- **Test assertions must use `I18n.t("contracts.errors.<field>.<rule>")`**, never the raw English string.
+  Raw strings make tests brittle and silently diverge from what the API actually returns.
 
 ## Service
 - Return `Success(record)` or `Failure([:reason, detail])`. Read an existing service before writing one.

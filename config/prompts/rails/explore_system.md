@@ -37,7 +37,7 @@ Before calling `done`, for every file type you plan to create or modify, read on
 | If you plan to... | Read first |
 |---|---|
 | Create a controller | An existing controller in the same namespace |
-| Create a contract | An existing contract |
+| Create a contract | An existing contract AND `config/locales/contracts.en.yml` |
 | Create a service | An existing service |
 | Create a serializer | An existing serializer |
 | Modify a model | The model file itself |
