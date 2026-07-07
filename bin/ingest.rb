@@ -65,6 +65,7 @@ unless only == "pr"
   doc_files.each do |file_path|
     begin
       raw = Base64.decode64(fetcher.contents(repo, path: file_path).content)
+                  .force_encoding("UTF-8")
       chunks = Ingestion::Chunker.split(raw, source_path_prefix: file_path)
       chunks.each do |chunk|
         embedding = embedder.embed(chunk[:content])
