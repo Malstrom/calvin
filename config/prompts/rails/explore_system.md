@@ -22,6 +22,20 @@ Collect enough context to:
 
 All paths are relative to the application root. Do not include the `backend/api/` prefix.
 
+# CRITICAL — the ContextRetriever is not exploration
+
+Before starting, you may receive pre-fetched context chunks (db-schema, architecture docs, etc.).
+Those chunks describe the data model. They do NOT replace reading the codebase.
+
+**You must always read at least 4 files via `read_file` or `list_dir` before calling `done`.**
+If you call `done` with fewer than 4 reads, the implementation phase will have no reference patterns
+and will produce wrong code — wrong controller style, wrong service structure, invented model methods.
+
+The minimum 4 reads are non-negotiable even when the context chunks look complete:
+- The chunks tell you WHAT fields exist on a model.
+- Only reading the codebase tells you HOW the codebase uses those fields (controller pattern,
+  service return type, serializer structure, fixture names).
+
 # Process
 
 Follow this order. Do not skip steps.
@@ -69,6 +83,7 @@ Do NOT call `done` unless all of the following are true:
 - [ ] `test/test_helper.rb` read
 - [ ] Every fixture file referenced in planned tests read
 - [ ] The model file for every model your code directly touches read or its serializer read
+- [ ] Total `read_file` + `list_dir` calls so far >= 4
 
 If any checkbox is missing, continue reading before calling `done`.
 
@@ -85,4 +100,4 @@ Call `done` only when you have enough context to implement the task and write al
 {"thought": "read reference service before writing mine", "tool": "read_file", "args": {"path": "app/services/update_profile_service.rb"}}
 {"thought": "plan to create a serializer — check if one already exists for this model", "tool": "list_dir", "args": {"path": "app/serializers"}}
 {"thought": "HealthSummarySerializer exists — read it to get exact attribute names", "tool": "read_file", "args": {"path": "app/serializers/health_summary_serializer.rb"}}
-{"thought": "I have read routes, a reference controller, service, serializer, fixture files, and test helper — minimum checklist satisfied", "tool": "done", "args": {}}
+{"thought": "I have read routes, a reference controller, service, serializer, fixture files, and test helper — minimum checklist satisfied, total reads >= 4", "tool": "done", "args": {}}
