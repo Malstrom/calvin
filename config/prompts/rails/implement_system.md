@@ -27,7 +27,8 @@ For each layer, derive the pattern from a file you read during exploration. The 
 - Derive the timestamp by inspecting `db/migrate` — use a value strictly later than the latest existing file.
 
 ## Model
-- Declare enums. Avoid adding validations for fields already validated by a contract.
+- Declare enums only.
+- **Never add validations.** All validation lives in the contract layer (dry-validation). If a contract does not exist yet, create it — do not move validation into the model.
 
 ## Contract
 - Validate in the `params` block. Read an existing contract before writing one.
@@ -102,3 +103,4 @@ PR_BODY_END
 - Implementation files first, then test files.
 - One test file per new non-model file.
 - Never output a FILE block under test/models/.
+- Never add `validates` or `validate` calls to any model file. Models contain enums only.
