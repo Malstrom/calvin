@@ -13,7 +13,7 @@ module Ingestion
     OPEN_TIMEOUT = 15
     READ_TIMEOUT = 30
     MAX_RETRIES  = 5
-    BASE_DELAY   = 2.0  # seconds, doubles on each retry
+    BASE_DELAY   = 2.0
 
     def initialize(api_key: ENV.fetch("MISTRAL_API_KEY"))
       @api_key = api_key
@@ -36,18 +36,20 @@ module Ingestion
 
         resp = http.request(req)
 
-        if resp.code == "429" && retries < MAX_RETRIES
-          retries += 1
-          puts "[embedder] 429 rate limit, retry #{retries}/#{MAX_RETRIES} in #{delay}s..."
-          sleep delay
-          delay *= 2
-          retry
-        end
-
+        raise RateLimitError, "retry after #{delay}s" if resp.code == "429"
         raise "Mistral embed error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
         JSON.parse(resp.body).dig("data", 0, "embedding")
+      rescue RateLimitError
+        raise if retries >= MAX_RETRIES
+        retries += 1
+        puts "[embedder] 429 rate limit, retry #{retries}/#{MAX_RETRIES} in #{delay}s..."
+        sleep delay
+        delay *= 2
+        retry
       end
     end
+
+    RateLimitError = Class.new(StandardError)
   end
 end
