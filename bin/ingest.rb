@@ -8,11 +8,26 @@
 #   ruby bin/ingest.rb --repo Malstrom/synca --only pr
 
 require "optparse"
+require "base64"
 require_relative "../lib/ingestion/chunker"
 require_relative "../lib/ingestion/embedder"
 require_relative "../lib/ingestion/supabase_store"
 require_relative "../lib/ingestion/pr_fetcher"
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def collect_md_files(client, repo, entry)
+  if entry.type == "dir"
+    client.contents(repo, path: entry.path).flat_map { |e| collect_md_files(client, repo, e) }
+  elsif entry.name.end_with?(".md")
+    [entry.path]
+  else
+    []
+  end
+rescue Octokit::NotFound
+  []
+end
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 options = { only: nil }
 OptionParser.new do |opts|
   opts.banner = "Usage: ruby bin/ingest.rb --repo OWNER/REPO [--only docs|pr]"
@@ -22,9 +37,9 @@ end.parse!
 
 raise "--repo is required" unless options[:repo]
 
-repo    = options[:repo]
-only    = options[:only]
-store   = Ingestion::SupabaseStore.new
+repo     = options[:repo]
+only     = options[:only]
+store    = Ingestion::SupabaseStore.new
 embedder = Ingestion::Embedder.new
 
 total_chunks  = 0
@@ -77,17 +92,12 @@ unless only == "docs"
   prs = Ingestion::PrFetcher.merged_since(repo, days: 90)
   prs.each do |pr|
     begin
-      chunk = {
-        source_type: "pr",
-        source_path: "pr/#{pr[:number]}",
-        content:     pr[:content]
-      }
-      embedding = embedder.embed(chunk[:content])
+      embedding = embedder.embed(pr[:content])
       store.upsert(
         repo:        repo,
-        source_type: chunk[:source_type],
-        source_path: chunk[:source_path],
-        content:     chunk[:content],
+        source_type: "pr",
+        source_path: "pr/#{pr[:number]}",
+        content:     pr[:content],
         embedding:   embedding
       )
       total_chunks  += 1
@@ -105,16 +115,3 @@ puts ""
 puts "[ingest] ✅ Done. chunks=#{total_chunks} upserts=#{total_upserts} errors=#{errors.size}"
 errors.each { |e| puts "  ✗ #{e}" }
 exit(errors.any? ? 1 : 0)
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-def collect_md_files(client, repo, entry)
-  if entry.type == "dir"
-    client.contents(repo, path: entry.path).flat_map { |e| collect_md_files(client, repo, e) }
-  elsif entry.name.end_with?(".md")
-    [entry.path]
-  else
-    []
-  end
-rescue Octokit::NotFound
-  []
-end
