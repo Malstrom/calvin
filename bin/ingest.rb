@@ -14,6 +14,8 @@ require_relative "../lib/ingestion/embedder"
 require_relative "../lib/ingestion/supabase_store"
 require_relative "../lib/ingestion/pr_fetcher"
 
+EMBED_RATE_DELAY = 1.2  # seconds between embed calls — Mistral free tier: ~1 req/s
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def collect_md_files(client, repo, entry)
   if entry.type == "dir"
@@ -68,6 +70,7 @@ unless only == "pr"
                   .force_encoding("UTF-8")
       chunks = Ingestion::Chunker.split(raw, source_path_prefix: file_path)
       chunks.each do |chunk|
+        sleep EMBED_RATE_DELAY
         embedding = embedder.embed(chunk[:content])
         store.upsert(
           repo:        repo,
@@ -93,6 +96,7 @@ unless only == "docs"
   prs = Ingestion::PrFetcher.merged_since(repo, days: 90)
   prs.each do |pr|
     begin
+      sleep EMBED_RATE_DELAY
       embedding = embedder.embed(pr[:content])
       store.upsert(
         repo:        repo,
