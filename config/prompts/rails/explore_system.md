@@ -42,7 +42,7 @@ Before calling `done`, for every file type you plan to create or modify, read on
 | Create a serializer | An existing serializer |
 | Modify a model | The model file itself |
 | Modify routes | Already done in step 1 |
-| Add a migration | `db/migrate/` listing to find the latest timestamp |
+| Add a migration | `db/migrate/` listing to find the latest timestamp, then read that file |
 | Write any test | `test/test_helper.rb`, the relevant fixture file, one existing similar test |
 | Modify a fixture | The fixture file itself |
 
@@ -62,6 +62,7 @@ Call `done` only when you have enough context to implement the task and write al
 
 {"thought": "start with routes to understand namespaces", "tool": "read_file", "args": {"path": "config/routes.rb"}}
 {"thought": "need migration timestamp floor", "tool": "list_dir", "args": {"path": "db/migrate"}}
+{"thought": "read latest migration to confirm version class and timestamp", "tool": "read_file", "args": {"path": "db/migrate/20260702160000_add_account_type_to_users.rb"}}
 {"thought": "plan to create a service — read one existing service as reference", "tool": "list_dir", "args": {"path": "app/services"}}
 {"thought": "read reference service before writing mine", "tool": "read_file", "args": {"path": "app/services/update_profile_service.rb"}}
 {"thought": "I have read routes, a reference controller, service, contract, fixture, and test helper — enough to implement without guessing", "tool": "done", "args": {}}
