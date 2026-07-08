@@ -38,7 +38,7 @@ flowchart TD
 
 ## Flusso 2 — Esecuzione automatica
 
-Calvin legge la issue, esplora la codebase, implementa, apre PR. Se la CI fallisce, `PrReviewFlow` fixa e riprova.
+Calvin legge la issue, esplora la codebase, implementa e apre PR. La CI valida il risultato.
 
 ```mermaid
 flowchart TD
@@ -54,9 +54,7 @@ flowchart TD
     I --> J[CI\ntest + Brakeman + bundler-audit]
     J --> K{CI passa?}
     K -- Si --> L([PR aperta\ncode review umana])
-    K -- No --> M[Label calvin-fix]
-    M --> N[PrReviewFlow\nBacktraceExtractor + LLM + commit]
-    N --> J
+    K -- No --> L
 ```
 
 ---
@@ -66,7 +64,6 @@ flowchart TD
 | Label | Dove | Flow | Stato |
 |-------|------|------|-------|
 | `calvin` | issue repo target | `ExploreFlow` | attivo |
-| `calvin-fix` | PR repo target | `PrReviewFlow` | attivo |
 | `calvin-rubocop` | PR repo target | `PrRubocopFixFlow` | pianificato |
 
 ---
@@ -95,7 +92,6 @@ lib/
   boot.rb                   requires, config, logging
   mode_router.rb            label -> mode symbol
   explore_flow.rb           ExploreFlow orchestrator
-  pr_review_flow.rb         PrReviewFlow orchestrator
   react_loop.rb             ReActLoop PHASE 1 + 2
   context_builder.rb        builds prompt da issue + .calvin/*
   file_parser.rb            parsa FILE: blocks dall'output LLM
@@ -113,7 +109,6 @@ config/
   prompts/rails/
     explore_system.md       system prompt PHASE 1
     implement_system.md     system prompt PHASE 2
-    pr_review_system.md     system prompt PrReviewFlow
 .agent.yml                  manifesto AI
 .scenarios.yml              catalogo scenari chat
 overview.yml                contesto di alto livello
@@ -140,4 +135,4 @@ Ogni PR Calvin contiene firma, token usage table e checkbox `- [ ] Approved`.
 
 - Ruby, gem `octokit`, `faraday`, `dry-monads`
 - Secrets: `GITHUB_TOKEN`, `MISTRAL_API_KEY`
-- Label `calvin` e `calvin-fix` create nel repo target
+- Label `calvin` creata nel repo target
