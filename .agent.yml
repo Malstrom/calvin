@@ -133,32 +133,6 @@ working_principles:
   - All configuration constants live in calvin.yml — never hardcode values in Ruby
   - Flow results use Calvin::FlowResult — access optional fields via result.meta(:key), never hash[:key]
 
-# ── Known recurring issues ─────────────────────────────────────────────────────────────
-known_issues:
-  model_tests_generated:
-    status: fixed (2026-07-06)
-    fix: implement_system.md Output format — "except models" added adjacent to
-         "tests are mandatory"; Do not test models section → cross-reference only
-  csv_jagged_rows:
-    status: fixed (2026-07-06)
-    fix: run_reporter.rb — r.fill(nil, r.size...CSV_HEADER.size) before csv << r
-         and before build_md destructuring
-  rubocop_config_wrong_dir:
-    status: fixed (2026-07-06)
-    fix: rubocop_runner.rb — .rubocop.yml ora scaricato dal repo target
-         via github.get_file_content, non più cercato in Dir.pwd di Calvin
-  refactoring_issue_17:
-    status: completed (2026-07-06)
-    summary: |
-      - Task 1: tutte le costanti in calvin.yml (LABEL_EXPLORE, API_URL inclusi)
-      - Task 2: Calvin::ModeRouter introdotto
-      - Task 3: Calvin::FlowResult — contratto condiviso tra flow
-      - Task 4: Calvin::PostSteps — run_post_steps spostato in lib/
-      - Task 5: Calvin::RubocopRunner estratto da RubocopAutocorrect
-      - Task 6: GitHubClient#fetch_pull_request + #list_pull_request_files
-      - Task 7: issue_commenter.rb eliminato (orfano)
-      - Task 8: .agent.yml aggiornato (questo commit)
-
 scenarios:
   spec: .scenarios.yml
   read_before_responding: true
