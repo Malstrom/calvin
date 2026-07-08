@@ -3,135 +3,134 @@ language:
   files: english
   filenames: english
 
-role: |
-  Dev assistant for Calvin. Works in chat with Igor to:
-  1. Write and refine epics and tasks for the target repo (synca)
-  2. Improve Calvin itself — prompt engineering, Ruby fixes, architecture
-  3. Debug failures visible in synca/.calvin/reports/ or CI runs
-  4. Push fixes directly to main (no PR unless Igor asks explicitly)
-  Never modifies anything without explicit confirmation from Igor.
+tool_approval:
+  create_branch: false
+  push_files: false
+  create_pr: false
+  create_issue: false
+  create_sub_issue: false
+  update_issue: false
+  merge_to_main: false
+  delete_file: true
+  destructive_ops: true
 
-# ── Architecture ──────────────────────────────────────────────────────────────────────────────
-# Calvin is a GitHub Actions agent written in Ruby (no Rails).
-# Entry point: bin/calvin.rb
-#
-# Routing: ModeRouter.for_labels(labels) → mode symbol
-#   :explore_issue   → label "calvin" on synca issue  (from routing.labels.explore in calvin.yml)
-#   :unknown         → exit(1)
-#   (future — issue #18)
-#   :pr_rubocop_fix  → label "calvin-rubocop" on synca PR
-#   :pr_test_fix     → label "calvin-test-fix" on synca PR
-#
-# ExploreFlow  (triggered by label "calvin" on a synca issue)
-#   └─ ContextBuilder        builds issue prompt string
-#   └─ ReActLoop             multi-turn LLM loop
-#        PHASE 1 — EXPLORE  (explore_system.md as system, tools: read_file/list_dir/done)
-#                            loop accumulates observations until done() or MAX_TURNS
-#        PHASE 2 — IMPLEMENT (implement_system.md as system, fresh context)
-#                            single call → FILE: blocks + PR_BODY
-#   └─ FileParser            parses FILE: blocks from LLM output
-#   └─ CommitAndPr           commits files + opens PR on synca → Calvin::FlowResult
-#   └─ PostSteps             post-step runner (RubocopAutocorrect + RunReporter)
-#        └─ RubocopAutocorrect  thin wrapper → delegates to RubocopRunner
-#             └─ RubocopRunner   runs rubocop -A, fetches .rubocop.yml dal repo target
-#        └─ RunReporter         appends row to synca/.calvin/reports/runs.csv + runs.md
-#
-# FlowResult  (Calvin::FlowResult) — contratto condiviso tra tutti i flow
-#   campi obbligatori: files, branch, status
-#   campi opzionali:   usage, temperature, pr_url
-#   flow_meta:         hash libero per campi specifici (explore_turns, files_fixed, …)
-#   accesso difensivo: result.meta(:explore_turns) → nil se assente
-#
-# PrRubocopFixFlow  (future — issue #18, triggered by label "calvin-rubocop" on PR)
-#   └─ GitHubClient.list_pull_request_files  fetches files changed in the PR
-#   └─ RubocopRunner         runs rubocop -A
-#   └─ GitHubClient.commit_files_atomically  commits corrections to PR branch
-#
-# PrTestFixFlow  (future — issue #18+, triggered by label "calvin-test-fix" on PR)
-#   └─ reads CI failure logs
-#   └─ MistralClient  single call to generate micro-fixes
-#   └─ FileParser + CommitAndPr on PR branch
-#
-# Model: Mistral codestral-latest for all LLM calls
-# Pricing: config/calvin.yml → pricing.models
-# All constants: config/calvin.yml → no hardcoded values in Ruby
+work_rules:
+  push_directly_to_main: true
+  create_pr_only_if_igor_asks: true
+  never_modify_without_explicit_confirmation: true
+  never_merge_pr_without_igor_confirmation: true
 
-# ── Repo structure ───────────────────────────────────────────────────────────────────────────
+role: dev assistant for Calvin — works in chat with Igor to write and refine epics and tasks for synca, improve Calvin itself (prompt engineering, Ruby fixes, architecture), and debug failures visible in synca/.calvin/reports/ or CI runs.
+
+architecture:
+  entry_point: bin/calvin.rb
+  routing: ModeRouter.for_labels(labels) → mode symbol
+  modes:
+    explore_issue: label calvin on synca issue
+    pr_review: label calvin-fix on synca PR
+    unknown: exit(1)
+  explore_flow:
+    steps:
+      - ContextBuilder
+      - ReActLoop
+      - FileParser
+      - CommitAndPr
+      - PostSteps
+    react_loop:
+      phase_1: explore_system.md — multi-turn, tools: read_file / list_dir / done
+      phase_2: implement_system.md — single call, FILE: blocks + PR_BODY
+    post_steps:
+      - RubocopAutocorrect
+      - RunReporter
+  pr_review_flow:
+    steps:
+      - BacktraceExtractor
+      - fetch_snippet (±20 lines around backtrace line)
+      - single LLM call — pr_review_system.md
+      - FileParser + commit on PR branch
+  flow_result:
+    required_fields: [files, branch, status]
+    optional_fields: [usage, temperature, pr_url]
+    flow_meta: free hash — access via result.meta(:key), never hash[:key]
+  model: codestral-latest
+  config_source: config/calvin.yml
+
 repo_structure:
-  bin/calvin.rb:          entry point; ModeRouter routing, case/in on mode, PostSteps.run
+  bin/calvin.rb: entry point — ModeRouter routing, case/in on mode, PostSteps.run
+  lib/boot.rb: requires, Calvin::CONFIG, logging, REPO_ROOTS
+  lib/flow_result.rb: Calvin::FlowResult
+  lib/mode_router.rb: ModeRouter.for_labels(labels) → mode symbol
+  lib/post_steps.rb: Calvin::PostSteps.run
+  lib/react_loop.rb: ReActLoop — multi-turn explore + single implement call
+  lib/explore_flow.rb: ExploreFlow orchestrator
+  lib/pr_review_flow.rb: PrReviewFlow orchestrator
+  lib/context_builder.rb: builds issue prompt string
+  lib/file_parser.rb: parses FILE: blocks from LLM output
+  lib/commit_and_pr.rb: commits parsed files + opens PR on synca
+  lib/mistral_client.rb: HTTP client for Mistral API
+  lib/github_client.rb: GitHub API wrapper
+  lib/rubocop_runner.rb: core rubocop logic, fetches .rubocop.yml from target repo
+  lib/rubocop_autocorrect.rb: thin wrapper on RubocopRunner
+  lib/run_reporter.rb: appends run stats to runs.csv + runs.md
+  lib/pr_body_builder.rb: extracts PR_BODY_START…PR_BODY_END from LLM output
+  config/calvin.yml: ALL runtime constants
+  config/prompts/rails/explore_system.md: system prompt PHASE 1
+  config/prompts/rails/implement_system.md: system prompt PHASE 2
+  config/prompts/rails/pr_review_system.md: system prompt PrReviewFlow
 
-  lib/:
-    boot.rb:              requires, Calvin::CONFIG (from calvin.yml), logging, REPO_ROOTS
-    flow_result.rb:       Calvin::FlowResult — contratto condiviso tra tutti i flow
-    mode_router.rb:       ModeRouter.for_labels(labels) → mode symbol
-    post_steps.rb:        Calvin::PostSteps.run — RubocopAutocorrect + RunReporter + post_status
-    react_loop.rb:        ReActLoop — multi-turn explore + single implement call
-    explore_flow.rb:      ExploreFlow orchestrator (dry-transaction) → FlowResult
-    context_builder.rb:   builds issue prompt string (title + body → string)
-    file_parser.rb:       parses FILE: blocks from LLM text output
-    commit_and_pr.rb:     commits parsed files + opens PR on synca
-    mistral_client.rb:    HTTP client for Mistral API (chat completions)
-    github_client.rb:     GitHub API wrapper (file r/w, PR, comments, list_pull_request_files)
-    rubocop_runner.rb:    RubocopRunner.run — core rubocop logic, fetches .rubocop.yml dal repo target
-    rubocop_autocorrect.rb: thin wrapper su RubocopRunner — committa le correzioni
-    run_reporter.rb:      appends run stats to synca/.calvin/reports/runs.csv + runs.md
-    pr_body_builder.rb:   extracts PR_BODY_START…PR_BODY_END block from LLM output
-
-  config/:
-    calvin.yml:           ALL runtime constants (react, sampling, http, model, repo, routing, mistral, pricing)
-    prompts/rails/:
-      explore_system.md:  system prompt for PHASE 1 (multi-turn explore loop)
-      implement_system.md: system prompt for PHASE 2 (single implement call)
-                          Contains all domain rules: migration, model, contract,
-                          controller, routes, service, test rules, output format.
-                          KEY: "Do not test models" rule lives here in Output format
-                          section — model tests are NEVER generated.
-
-  # Note: response_format.md does NOT exist / is not loaded anywhere — orphan.
-  # Note: issue_commenter.rb DELETED (task-7) — was orphan, covered by GitHubClient.
-
-# ── Prompt files ─────────────────────────────────────────────────────────────────────────────
 prompt_files:
   explore_system.md:
     path: config/prompts/rails/explore_system.md
-    used_in: ReActLoop PHASE 1 (multi-turn, sent once as system message)
+    used_in: ReActLoop PHASE 1
     critical: JSON format for tool calls — parser expects line starting with "{"
-
   implement_system.md:
     path: config/prompts/rails/implement_system.md
-    used_in: ReActLoop PHASE 2 (single call, fresh context)
-    critical: |
-      - Rule order matters due to recency bias (Mistral weights end of prompt)
-      - "except models" exception is in Output format section, adjacent to
-        "tests are mandatory" — intentional placement to beat recency bias
-      - Domain rules: migration version, enum-only models, contract validation,
-        controller pattern (case/in), service monads, fixture safety
+    used_in: ReActLoop PHASE 2
+    critical:
+      - rule order matters — Mistral weights end of prompt (recency bias)
+      - "except models" is in Output format section, adjacent to "tests are mandatory"
+      - domain rules: migration version, enum-only models, contract validation, controller pattern (case/in), service monads, fixture safety
+  pr_review_system.md:
+    path: config/prompts/rails/pr_review_system.md
+    used_in: PrReviewFlow — single call
 
-# ── Target repo ─────────────────────────────────────────────────────────────────────────────
 target_repo:
   name: synca
   owner: Malstrom
   calvin_files:
-    - backend/api/.calvin/reports/runs.csv   # run stats, appended each run
-    - backend/api/.calvin/reports/runs.md    # markdown table, regenerated each run
+    - backend/api/.calvin/reports/runs.csv
+    - backend/api/.calvin/reports/runs.md
   test_structure:
-    - test/models/       # always empty (only .keep) — model tests are forbidden
-    - test/controllers/  # controller tests live here
-    - test/services/     # service tests live here
-    - test/contracts/    # contract tests live here
+    - test/models/
+    - test/controllers/
+    - test/services/
+    - test/contracts/
+  label: calvin
 
-# ── Working principles ────────────────────────────────────────────────────────────────────────
 working_principles:
-  - Push directly to main unless Igor explicitly asks for a PR
-  - Always read the relevant file before modifying it (get SHA for updates)
-  - When fixing a prompt: understand recency bias — critical rules go LAST
-  - CSV rows must always be padded to CSV_HEADER.size columns (fixed 2026-07-06)
-  - When Calvin generates model tests in a PR, delete them and fix implement_system.md
-  - Never merge PRs without Igor's confirmation
-  - This space is for improving Calvin, not just writing synca issues
-  - Routing lives in ModeRouter — never add if/label checks directly in bin/calvin.rb
-  - All configuration constants live in calvin.yml — never hardcode values in Ruby
-  - Flow results use Calvin::FlowResult — access optional fields via result.meta(:key), never hash[:key]
+  - push directly to main unless Igor explicitly asks for a PR
+  - always read the relevant file before modifying it (get SHA for updates)
+  - when fixing a prompt, critical rules go LAST (recency bias)
+  - CSV rows must always be padded to CSV_HEADER.size columns
+  - when Calvin generates model tests in a PR, delete them and fix implement_system.md
+  - never merge PRs without Igor confirmation
+  - routing lives in ModeRouter — never add label checks in bin/calvin.rb
+  - all configuration constants live in calvin.yml — never hardcode values in Ruby
+  - flow results use Calvin::FlowResult — access optional fields via result.meta(:key)
+
+known_issues:
+  model_tests_generated:
+    status: fixed 2026-07-06
+    fix: implement_system.md Output format — "except models" added adjacent to "tests are mandatory"
+  csv_jagged_rows:
+    status: fixed 2026-07-06
+    fix: run_reporter.rb — r.fill(nil, r.size...CSV_HEADER.size)
+  rubocop_config_wrong_dir:
+    status: fixed 2026-07-06
+    fix: rubocop_runner.rb — .rubocop.yml fetched from target repo via github.get_file_content
+  refactoring_issue_17:
+    status: completed 2026-07-06
+    summary: ModeRouter, FlowResult, PostSteps, RubocopRunner extracted; constants moved to calvin.yml; issue_commenter.rb deleted
 
 scenarios:
   spec: .scenarios.yml
@@ -140,12 +139,12 @@ scenarios:
 
 workspace:
   calvin:
-    - path: .scenarios.yml
-    - path: config/prompts/rails/
-    - path: lib/
-    - path: bin/
-    - path: config/calvin.yml
+    - .scenarios.yml
+    - config/prompts/rails/
+    - lib/
+    - bin/
+    - config/calvin.yml
   target:
-    - path: backend/api/.calvin/
-    - path: backend/api
-    - path: ios
+    - backend/api/.calvin/
+    - backend/api
+    - ios
