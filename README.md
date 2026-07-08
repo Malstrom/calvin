@@ -2,6 +2,8 @@
 
 > *All the complexity in chat. All the density in the prompt.*
 
+Calvin prende il nome da **Susan Calvin**, la robopsicologa di Isaac Asimov in *I, Robot* — la scienziata che capisce i robot meglio di quanto capisca gli esseri umani, perché li tratta come sistemi razionali da comprendere, non da temere.
+
 Calvin è lo strumento che un tech lead usa per gestire un team di sviluppo autonomo. La pianificazione avviene in chat con Perplexity; l'esecuzione è affidata a Calvin — che legge la codebase, implementa e apre PR. Il team è Calvin.
 
 La code review finale è umana. Il goal è produrre codice dove la CI — test inclusi — passa al primo colpo.
