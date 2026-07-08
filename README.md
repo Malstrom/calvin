@@ -2,7 +2,7 @@
 
 > *All the complexity in chat. All the density in the prompt.*
 
-Calvin è un **framework di sviluppo autonomo**, non un copilot. Il suo scopo è sostituire il tech lead nel ciclo di pianificazione ed esecuzione: legge documentazione, crea epiche insieme a Perplexity, le decompone in task, le raffina fino a renderle eseguibili, poi le manda in sviluppo aprendo PR su una repo target.
+Calvin è lo strumento che un tech lead usa per gestire un team di sviluppo autonomo. La pianificazione avviene in chat con Perplexity; l'esecuzione è affidata a Calvin — che legge la codebase, implementa e apre PR. Il team è Calvin.
 
 La code review finale è umana. Il goal è produrre codice dove la CI — test inclusi — passa al primo colpo.
 
