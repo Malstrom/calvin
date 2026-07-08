@@ -12,65 +12,52 @@ La code review finale è umana. Il goal è produrre codice dove la CI — test i
 
 | Attore | Ruolo |
 |--------|-------|
-| **Igor** | Crea issue, conferma scenari, aggiunge label, revisiona e mergia le PR |
 | **Perplexity (chat)** | Guida il ciclo di pianificazione: epiche, decomposizione, raffinamento, prompt agente |
 | **Calvin (GitHub Actions)** | Esegue i flow automatici: legge issue + contesto, chiama il modello, apre PR |
 | **Codestral** (`codestral-latest`) | Modello LLM per tutte le call |
 
 ---
 
-## Flusso completo
+## Flusso 1 — Pianificazione in chat
+
+Perplexity gestisce il ciclo di pianificazione tramite scenari. L'output finale è una issue raffinata con prompt pronto e label `calvin`.
 
 ```mermaid
 flowchart TD
-    A([Igor ha un obiettivo]) --> B[Ragionamento in chat]
-    B --> C[create_epic\nIssue con label epic]
-    C --> D[decompose\nSub-issue task]
+    A([Obiettivo o idea]) --> B[session_start\nstato progetto e PR aperte]
+    B --> C[create_epic\ncrea issue con label epic]
+    C --> D[decompose\ncrea sub-issue task]
     D --> E[refine_task\nAC + decisioni + rischi]
     E --> F{Task pronta?}
     F -- No --> E
-    F -- Si --> G[agent_prompt\nPrompt strutturato]
-    G --> H[Igor aggiunge label calvin]
-
-    H --> I[ModeRouter\nexplore_issue]
-    I --> J[ContextBuilder]
-    J --> K[ReActLoop PHASE 1\nread_file / list_dir / done]
-    K --> L{Contesto sufficiente?}
-    L -- No --> K
-    L -- Si --> M[ReActLoop PHASE 2\nFILE blocks + PR_BODY]
-    M --> N[FileParser]
-    N --> O[CommitAndPr\nissue-NNN-slug-calvin]
-    O --> P[PostSteps\nRubocop + RunReporter]
-
-    P --> Q[CI synca\ntest + Brakeman + bundler-audit]
-    Q --> R{CI passa?}
-    R -- Si --> S[Igor revisiona e mergia]
-    R -- No --> T[Igor aggiunge label calvin-fix]
-    T --> U[PrReviewFlow\nBacktraceExtractor + LLM + commit]
-    U --> Q
+    F -- Si --> G[agent_prompt\nprompt strutturato sulla issue]
+    G --> H([Label calvin aggiunta\nCalvin parte])
 ```
 
 ---
 
-## Due modi di usare Calvin
+## Flusso 2 — Esecuzione automatica
 
-### Modalità 1 — Chat con scenari (Perplexity Space)
+Calvin legge la issue, esplora la codebase, implementa, apre PR. Se la CI fallisce, `PrReviewFlow` fixa e riprova.
 
-Lavori in chat con Perplexity. Calvin non esegue codice: Perplexity gestisce il ciclo di pianificazione usando gli **scenari** definiti in `.scenarios.yml`.
-
+```mermaid
+flowchart TD
+    A([Label calvin su issue]) --> B[ModeRouter\nexplore_issue]
+    B --> C[ContextBuilder\nbuilds prompt da issue]
+    C --> D[ReActLoop PHASE 1\nread_file / list_dir / done]
+    D --> E{Contesto sufficiente?}
+    E -- No --> D
+    E -- Si --> F[ReActLoop PHASE 2\nFILE blocks + PR_BODY]
+    F --> G[FileParser]
+    G --> H[CommitAndPr\nbranch issue-NNN-slug-calvin]
+    H --> I[PostSteps\nRubocop + RunReporter]
+    I --> J[CI\ntest + Brakeman + bundler-audit]
+    J --> K{CI passa?}
+    K -- Si --> L([PR aperta\ncode review umana])
+    K -- No --> M[Label calvin-fix]
+    M --> N[PrReviewFlow\nBacktraceExtractor + LLM + commit]
+    N --> J
 ```
-session_start  →  stato del progetto, PR aperte, issue in corso
-create_epic    →  issue con label epic
-decompose      →  sub-issue task collegate all'epica
-refine_task    →  issue con AC, decisioni, rischi, contesto
-agent_prompt   →  prompt strutturato pronto per l'esecuzione
-```
-
-Quando una task è pronta, Igor aggiunge la label `calvin` → Calvin parte.
-
-### Modalità 2 — Esecuzione automatica su repo target
-
-Calvin è agganciato alla repo target via GitHub Actions. Quando riceve la label `calvin` su una issue, esegue `ExploreFlow`. Se la CI fallisce sulla PR, la label `calvin-fix` attiva `PrReviewFlow`.
 
 ---
 
@@ -78,9 +65,9 @@ Calvin è agganciato alla repo target via GitHub Actions. Quando riceve la label
 
 | Label | Dove | Flow | Stato |
 |-------|------|------|-------|
-| `calvin` | issue synca | `ExploreFlow` | ✅ attivo |
-| `calvin-fix` | PR synca | `PrReviewFlow` | ✅ attivo |
-| `calvin-rubocop` | PR synca | `PrRubocopFixFlow` | 🔜 pianificato |
+| `calvin` | issue repo target | `ExploreFlow` | attivo |
+| `calvin-fix` | PR repo target | `PrReviewFlow` | attivo |
+| `calvin-rubocop` | PR repo target | `PrRubocopFixFlow` | pianificato |
 
 ---
 
@@ -88,25 +75,25 @@ Calvin è agganciato alla repo target via GitHub Actions. Quando riceve la label
 
 | Scenario | Trigger | Output |
 |----------|---------|--------|
-| `session_start` | Inizio conversazione, status progetto | Riepilogo PR aperte, issue in corso |
-| `create_epic` | "crea epic" | Issue con label `epic` |
-| `decompose` | "decomponila" | Sub-issue task collegate all'epica |
-| `report_bug` | "traccia il bug" | Issue bug strutturata |
-| `refine_task` | "raffina la task" | Issue aggiornata con AC, decisioni, rischi |
-| `agent_prompt` | "scrivi il prompt" | Prompt strutturato per esecuzione asincrona |
-| `review_pr` | "review", numero PR | Analisi PR con osservazioni |
-| `update_context` | PR mergiata | Aggiornamento `.agent.yml` / `overview.yml` |
-| `calvanize` | "calvanize" | Bootstrap Calvin su nuovo repo target |
+| `session_start` | inizio conversazione, status progetto | riepilogo PR aperte, issue in corso |
+| `create_epic` | "crea epic" | issue con label `epic` |
+| `decompose` | "decomponila" | sub-issue task collegate all'epica |
+| `report_bug` | "traccia il bug" | issue bug strutturata |
+| `refine_task` | "raffina la task" | issue aggiornata con AC, decisioni, rischi |
+| `agent_prompt` | "scrivi il prompt" | prompt strutturato per esecuzione asincrona |
+| `review_pr` | "review", numero PR | analisi PR con osservazioni |
+| `update_context` | PR mergiata | aggiornamento `.agent.yml` / `overview.yml` |
+| `calvanize` | "calvanize" | bootstrap Calvin su nuovo repo target |
 
 ---
 
 ## Struttura repo
 
 ```
-bin/calvin.rb               ← entry point; ModeRouter + PostSteps
+bin/calvin.rb               entry point
 lib/
   boot.rb                   requires, config, logging
-  mode_router.rb            label → mode symbol
+  mode_router.rb            label -> mode symbol
   explore_flow.rb           ExploreFlow orchestrator
   pr_review_flow.rb         PrReviewFlow orchestrator
   react_loop.rb             ReActLoop PHASE 1 + 2
@@ -127,7 +114,7 @@ config/
     explore_system.md       system prompt PHASE 1
     implement_system.md     system prompt PHASE 2
     pr_review_system.md     system prompt PrReviewFlow
-.agent.yml                  manifesto AI — architettura, principi, workspace
+.agent.yml                  manifesto AI
 .scenarios.yml              catalogo scenari chat
 overview.yml                contesto di alto livello
 ```
