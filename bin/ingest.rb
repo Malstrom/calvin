@@ -3,129 +3,98 @@
 # Entry point CLI per l'ingestion RAG.
 #
 # Usage:
-#   ruby bin/ingest.rb --repo Malstrom/synca
-#   ruby bin/ingest.rb --repo Malstrom/synca --only docs
-#   ruby bin/ingest.rb --repo Malstrom/synca --only pr
-#   ruby bin/ingest.rb --repo Malstrom/synca --only pr --pr 42
+#   ruby bin/ingest.rb --repo Malstrom/synca --pr 42
+#
+# Flusso:
+#   1. RulesFetcher legge i commenti della PR, trova <!-- calvin:rules -->
+#   2. Estrae solo i bullet checkati (- [x])
+#   3. Per ogni bullet: embedding → dedup check → upsert o skip
+#   4. Log completo di ogni chunk (contenuto intero + esito)
 
 require "optparse"
-require "base64"
-require_relative "../lib/ingestion/chunker"
+require_relative "../lib/boot"
+require_relative "../lib/ingestion/rules_fetcher"
 require_relative "../lib/ingestion/embedder"
 require_relative "../lib/ingestion/supabase_store"
-require_relative "../lib/ingestion/pr_fetcher"
 
-EMBED_RATE_DELAY = 1.2  # seconds between embed calls — Mistral free tier: ~1 req/s
+EMBED_RATE_DELAY  = 1.2   # seconds — Mistral free tier ~1 req/s
+DEDUP_THRESHOLD   = 0.92  # similarità minima per considerare un chunk duplicato
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-def collect_md_files(client, repo, entry)
-  if entry.type == "dir"
-    client.contents(repo, path: entry.path).flat_map { |e| collect_md_files(client, repo, e) }
-  elsif entry.name.end_with?(".md")
-    [entry.path]
-  else
-    []
-  end
-rescue Octokit::NotFound
-  []
-end
-
-# ── CLI ───────────────────────────────────────────────────────────────────────
-options = { only: nil, pr_number: nil }
+# ── CLI ─────────────────────────────────────────────────────────────────────────────────
+options = {}
 OptionParser.new do |opts|
-  opts.banner = "Usage: ruby bin/ingest.rb --repo OWNER/REPO [--only docs|pr] [--pr NUMBER]"
-  opts.on("--repo REPO",   "Target repo (e.g. Malstrom/synca)") { |v| options[:repo]      = v }
-  opts.on("--only TYPE",   "Ingest only 'docs' or 'pr'")        { |v| options[:only]      = v }
-  opts.on("--pr NUMBER",   "Ingest a single PR by number")      { |v| options[:pr_number] = v.to_i }
+  opts.banner = "Usage: ruby bin/ingest.rb --repo OWNER/REPO --pr NUMBER"
+  opts.on("--repo REPO",  "Target repo (e.g. Malstrom/synca)") { |v| options[:repo]      = v }
+  opts.on("--pr NUMBER",  "PR number to ingest rules from")     { |v| options[:pr_number] = v.to_i }
 end.parse!
 
 raise "--repo is required" unless options[:repo]
+raise "--pr is required"   unless options[:pr_number]
 
 repo      = options[:repo]
-only      = options[:only]
 pr_number = options[:pr_number]
 store     = Ingestion::SupabaseStore.new
 embedder  = Ingestion::Embedder.new
 
-total_chunks  = 0
-total_upserts = 0
-errors        = []
+total_upserted = 0
+total_skipped  = 0
+errors         = []
 
-# ── DOCS ──────────────────────────────────────────────────────────────────────
-unless only == "pr"
-  puts "[ingest] Fetching docs from #{repo}..."
-  fetcher = Octokit::Client.new(access_token: ENV.fetch("GITHUB_TOKEN"))
+# ── FETCH RULES ─────────────────────────────────────────────────────────────────────────
+puts "[ingest] Fetching rules from PR ##{pr_number} in #{repo}..."
 
-  doc_files = []
-  ["docs"].each do |dir|
-    begin
-      fetcher.contents(repo, path: dir).each do |entry|
-        doc_files.concat(collect_md_files(fetcher, repo, entry))
-      end
-    rescue Octokit::NotFound
-      puts "[ingest] WARN: #{dir}/ not found in #{repo}, skipping."
-    end
-  end
+chunks = Ingestion::RulesFetcher.from_pr(repo, pr_number)
 
-  doc_files.each do |file_path|
-    begin
-      raw = Base64.decode64(fetcher.contents(repo, path: file_path).content)
-                  .force_encoding("UTF-8")
-      chunks = Ingestion::Chunker.split(raw, source_path_prefix: file_path)
-      chunks.each do |chunk|
-        sleep EMBED_RATE_DELAY
-        embedding = embedder.embed(chunk[:content])
-        store.upsert(
-          repo:        repo,
-          source_type: chunk[:source_type],
-          source_path: chunk[:source_path],
-          content:     chunk[:content],
-          embedding:   embedding
-        )
-        total_upserts += 1
-      end
-      total_chunks += chunks.size
-      puts "[ingest] #{file_path} → #{chunks.size} chunk(s)"
-    rescue => e
-      errors << "#{file_path}: #{e.message}"
-      puts "[ingest] ERROR #{file_path}: #{e.message}"
-    end
-  end
+if chunks.empty?
+  puts "[ingest] WARN: no checked rules found in PR ##{pr_number} — nothing to ingest"
+  exit 0
 end
 
-# ── PR ────────────────────────────────────────────────────────────────────────
-unless only == "docs"
-  prs = if pr_number
-    puts "[ingest] Fetching single PR ##{pr_number} from #{repo}..."
-    [Ingestion::PrFetcher.single(repo, pr_number)].compact
-  else
-    puts "[ingest] Fetching merged PRs from #{repo}..."
-    Ingestion::PrFetcher.merged_since(repo, days: 90)
-  end
-
-  prs.each do |pr|
-    begin
-      sleep EMBED_RATE_DELAY
-      embedding = embedder.embed(pr[:content])
-      store.upsert(
-        repo:        repo,
-        source_type: "pr",
-        source_path: "pr/#{pr[:number]}",
-        content:     pr[:content],
-        embedding:   embedding
-      )
-      total_chunks  += 1
-      total_upserts += 1
-      puts "[ingest] PR ##{pr[:number]} → upserted"
-    rescue => e
-      errors << "pr/#{pr[:number]}: #{e.message}"
-      puts "[ingest] ERROR pr/#{pr[:number]}: #{e.message}"
-    end
-  end
-end
-
-# ── SUMMARY ───────────────────────────────────────────────────────────────────
+puts "[ingest] #{chunks.size} rule(s) to process"
 puts ""
-puts "[ingest] ✅ Done. chunks=#{total_chunks} upserts=#{total_upserts} errors=#{errors.size}"
+
+# ── PROCESS EACH CHUNK ───────────────────────────────────────────────────────────────────
+chunks.each do |chunk|
+  puts "[ingest] ── #{chunk[:source_path]} ─" * 2
+  chunk[:content].each_line { |l| puts "[ingest] #{l.rstrip}" }
+  puts ""
+
+  begin
+    sleep EMBED_RATE_DELAY
+    embedding = embedder.embed(chunk[:content])
+
+    # — dedup check —————————————————————————————————————————————
+    similar = store.similar_to(embedding, repo: repo, threshold: DEDUP_THRESHOLD, limit: 1)
+
+    if similar.any?
+      existing = similar.first
+      puts "[ingest] → SKIPPED (similar chunk exists)"
+      puts "[ingest]   match:      #{existing['source_path']} (similarity=#{format('%.4f', existing['similarity'])})"
+      puts "[ingest]   existing:   #{existing['content'].to_s.lines.map(&:rstrip).join("\n[ingest]               ")}"
+      total_skipped += 1
+      next
+    end
+
+    # — upsert —————————————————————————————————————————————————
+    store.upsert(
+      repo:        repo,
+      source_type: chunk[:source_type],
+      source_path: chunk[:source_path],
+      content:     chunk[:content],
+      embedding:   embedding
+    )
+    puts "[ingest] → upserted"
+    total_upserted += 1
+
+  rescue => e
+    puts "[ingest] → ERROR: #{e.message}"
+    errors << "#{chunk[:source_path]}: #{e.message}"
+  end
+
+  puts ""
+end
+
+# ── SUMMARY ─────────────────────────────────────────────────────────────────────────────
+puts "[ingest] ✅ Done. upserted=#{total_upserted} skipped=#{total_skipped} errors=#{errors.size}"
 errors.each { |e| puts "  ✗ #{e}" }
 exit(errors.any? ? 1 : 0)
