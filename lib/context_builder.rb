@@ -1,10 +1,12 @@
 # frozen_string_literal: true
-# Costruisce il prompt per il ReActLoop.
+# Costruisce il prompt utente per il ReActLoop.
 #
 # Fonti:
 #   1. title + body dell'issue
 #   2. NEXT_MIGRATION_VERSION (letto dal repo target)
-#   3. chunk RAG da Supabase via ContextRetriever (graceful fallback se non configurato)
+#
+# Nota: il retrieval RAG è responsabilità di ExploreFlow (step retrieve_context),
+# non di questo builder.
 
 module Calvin
   class ContextBuilder
@@ -29,15 +31,9 @@ module Calvin
         Calvin::LOG.info "  migration_version : #{next_version}"
       end
 
-      retrieved = Calvin::ContextRetriever.call(issue)
-      content   = [content, retrieved].compact.join("\n\n") if retrieved
-
       content
     end
 
-    # Legge la directory db/migrate, ordina i nomi, prende il timestamp
-    # dell'ultimo file e restituisce timestamp+1 (come stringa a 14 cifre).
-    # Fallback: usa Time.now.utc formattato.
     def self.next_migration_version(github_client)
       entries = github_client.list_directory(MIGRATIONS_PATH)
       timestamps = entries
