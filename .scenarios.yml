@@ -35,13 +35,6 @@ scenarios:
       - user references a bug issue number to deepen
     file: scenarios/refine_task.yml
 
-  - id: agent_prompt
-    triggers:
-      - user wants to prepare the agent prompt for async execution
-      - user says "scrivi il prompt", "prepara per il modello", "prompt agente"
-      - user references a task issue number ready for execution
-    file: scenarios/agent_prompt.yml
-
   - id: calvanize
     triggers:
       - user wants to bootstrap Calvin on a new repo
