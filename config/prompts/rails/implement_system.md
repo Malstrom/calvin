@@ -16,245 +16,53 @@ Deliver a complete, working implementation of the issue:
 - **Follow the codebase, not your assumptions.** Every pattern you use must have been seen in a file you read during exploration. If you did not read a reference, do not invent the pattern.
 - **Minimal scope.** Implement exactly what the issue describes. Do not improve adjacent code, rename things, or refactor unless the issue explicitly asks for it.
 - **If something is ambiguous**, implement the most conservative interpretation and document the assumption in the PR body under "Decisions made".
-- **Never guess timestamps, fixture names, attribute names, or enum values.** If you did not read the file that contains them, go back and read it.
-- **Never reconstruct an existing file from memory.** Before outputting a FILE block for an existing file, you must have read its current content during exploration. If you did not read it, you will silently delete code that was there. When in doubt, note the gap in the PR body under "Decisions made" instead of guessing.
-
-# Architecture rule — the controller/service/serializer triad
-
-Every controller action that returns data must have exactly three collaborators:
-
-```
-Controller  →  calls  →  Service       (produces the record / value object)
-                    →  Serializer    (shapes the JSON from the record)
-```
-
-**The controller contains no business logic and no JSON shaping.** Its only job is:
-1. Authenticate / authorize
-2. Call the service with params
-3. Pattern-match on the result
-4. Pass the record to the serializer
-5. Render
-
-If you find yourself writing computation, string building, or hash construction inside a controller action or a service's return value, stop — that code belongs in the serializer.
-
-A correct controller action looks like this:
-```ruby
-def show
-  case SomeService.call(user: current_user)
-  in Success[record]
-    render_success(SomeSerializer.new(record).as_json)
-  in Failure[:not_found, message]
-    render_error(:not_found, message)
-  end
-end
-```
-
-Nothing else belongs in the action body.
-
-# Rules by layer
-
-For each layer, derive the pattern from a file you read during exploration. The rules below are guardrails — the codebase is the specification.
-
-## Migration
-- Use the version class shown in the migrations you read. The current version is `ActiveRecord::Migration[8.0]` — never use a different version unless a migration you read during exploration shows otherwise.
-- Derive the timestamp by inspecting `db/migrate` — use a value strictly later than the latest existing file.
-- `algorithm: :concurrently` is valid only on `add_index`. Never use it on `add_column`.
-
-## Model
-- Declare enums only.
-- Use keyword-first enum syntax: `enum :field_name, { value: 0 }`. Never use hash-rocket syntax: `enum field_name: { value: 0 }` — it raises ArgumentError on Rails 7+.
-- When modifying an existing model, preserve every existing `enum`, `belongs_to`, and `has_many` declaration. Output the complete file including pre-existing lines.
-- **Never add validations.** All validation lives in the contract layer (dry-validation). If a contract does not exist yet, create it — do not move validation into the model.
-
-## Contract
-- Validate in the `params` block using inline predicates: `included_in?`, `filled?`, `gt?`, `lt?`, etc.
-- Use `ModelName.field_name_pluralized.keys` to reference enum values dynamically (e.g. `PreferenceProfile.temperature_preferences.keys`).
-- **Never use `rule` blocks** for single-field constraints. `rule` is only for cross-field validation. Single-field constraints belong in `params`.
-- **Never define constants** inside the contract class.
-- Read an existing contract before writing one.
-- **Error message strings go in `config/locales/contracts.en.yml`**, never inline in the contract or test.
-  Keys are organized by field name, not by contract class: `contracts.errors.<field_name>.<rule_name>`
-  — e.g. `contracts.errors.activity_level.inclusion`.
-  When adding a new field validation, add the corresponding key to that file.
-  Read the file before modifying it — never overwrite existing keys.
-- **Test assertions must use `I18n.t("contracts.errors.<field>.<rule>")`**, never the raw English string.
-  Raw strings make tests brittle and silently diverge from what the API actually returns.
-
-## Service
-- Return `Success(record)` or `Failure([:reason, detail])`. Read an existing service before writing one.
-- **The service returns the record or a plain value object — never a pre-shaped JSON hash.**
-  JSON shaping is the serializer's responsibility. A service that returns
-  `{ chronotype_label: ..., peak_energy_window: ... }` is doing the serializer's job.
-- **When using `case/when` with numeric ranges, always use exclusive-end ranges (`...`) for lower
-  bounds to avoid boundary ambiguity.** A value exactly on a boundary matches the first `when` clause
-  it appears in — with inclusive ranges (`..`) the same value matches two clauses and the second is
-  silently unreachable. Correct pattern:
-  ```
-  case value
-  when 0.0...0.4 then "low"    # 0.4 excluded → falls through to next
-  when 0.4...0.7 then "medium" # 0.4 included, 0.7 excluded
-  when 0.7..1.0  then "high"   # 0.7 included
-  end
-  ```
-
-## Serializer
-- **Every JSON response that exposes model or computed data must go through an Alba serializer.**
-  Never build a response hash inside a service or controller.
-- Read an existing serializer before writing one. All serializers live in `app/serializers/` and
-  follow this structure:
-  ```ruby
-  class SignalsSummarySerializer
-    include Alba::Resource
-
-    attributes :plain_attribute          # direct model attribute
-    attribute(:computed_field) { |obj| obj.some_method }  # computed
-  end
-  ```
-- The controller instantiates the serializer and passes it to `render_success`:
-  ```ruby
-  render_success(SignalsSummarySerializer.new(record).as_json)
-  ```
-- Serializers do **not** receive hashes — they receive ActiveRecord objects or plain Ruby objects
-  that respond to the methods declared in `attribute` blocks.
-- **Every method called on `obj` inside an `attribute` block must exist on the model.** Before
-  writing `obj.some_method`, verify that method exists by checking either the model's serializer
-  (if one was read during exploration) or the model file itself. Never call a method you have not
-  confirmed exists.
-- One serializer per resource. If a response nests a sub-resource, compose serializers:
-  ```ruby
-  attribute(:preference_profile) { |obj| PreferencesSerializer.new(obj.preference_profile).as_json }
-  ```
-
-## Controller
-- Use the response helpers and pattern matching style shown in the controllers you read.
-- Extract params using the pattern shown in adjacent controllers.
-- **Never call `.value!` directly in a controller action.** `.value!` raises
-  `Dry::Monads::UnwrapError` on any `Failure` result — it is never safe in a controller.
-  Always unwrap monads with `case/in` pattern matching:
-  ```ruby
-  case SomeService.call(...)
-  in Success[result]
-    render_success(SomeSerializer.new(result).as_json)
-  in Failure[:reason, message]
-    render_error(reason, message)
-  end
-  ```
-  `.value!` is allowed only in test files (service tests) where a failure is an explicit test bug.
-
-## Routes
-- Mirror the exact `to:` string pattern of adjacent routes in the same namespace block.
-
-## i18n locale files
-- Locale keys go in the appropriate `config/locales/*.yml` file. Read the file before modifying it — never overwrite existing keys.
-- **Each interpolation variable in a translation string must have a unique key name.**
-  `"You declared %{self_chronotype} but your data shows %{chronotype}"` is correct.
-  `"You declared %{chronotype} but your data shows %{chronotype}"` is wrong — both placeholders
-  resolve to the same value silently, producing a misleading message.
-- When a translation uses interpolation, every variable passed to `I18n.t(key, ...)` must match
-  exactly the placeholder names declared in the string. Missing variables raise `KeyError` at runtime.
-
-# Test rules
-
-## Coverage
-For every controller action, write one test per branch:
-- Each `Success` path → one test
-- Each `Failure` path → one test
-- Auth-required endpoint → one 401 test
-- Contract rejection → one 422 test
-
-For every service, write one test per return path.
-
-Missing a branch = missing a test.
-
-## Contract tests
-`Contract.new.call(...)` returns `Dry::Validation::Result`, not a monad. Use `success?`, `failure?`, `errors.to_h`. Error messages are strings, not symbols. Read an existing contract test to find the exact message format — do not guess.
-
-## Service tests
-Use `value!` or pattern matching. Read an existing service test for the exact monad API used in this codebase.
-
-## Fixtures — hard rules
-
-**Rule 1 — Read before reference.**
-Before referencing any fixture name (e.g. `users(:alice)`, `health_summaries(:alice_health)`), you must have read that fixture file during exploration. If you have not read it, read it now. Do not guess names.
-
-**Rule 2 — Never create a new fixture file.**
-Do not output a FILE block whose path is under `test/fixtures/`. Fixture files are owned by the team. If a test requires a fixture that does not exist, document the gap in the PR body under "Decisions made" — do not create it.
-
-**Rule 3 — Never modify an existing fixture file.**
-Do not output a FILE block for any file that already exists under `test/fixtures/`. Even if you believe a column is missing, do not touch the fixture. Adding or changing rows in fixture files breaks other tests that rely on the exact rows present.
-
-**Rule 4 — Never output a FILE block under `test/fixtures/`.**
-This is the enforcement of Rules 2 and 3. If you find yourself writing `FILE: test/fixtures/anything.yml`, stop. Remove the block. Document the assumption instead.
-
-**Rule 5 — Tests must compile against existing fixtures.**
-Design your tests to work with whatever rows already exist in the fixture files. If no suitable fixture exists for a scenario, use an inline `create`/`build` or skip the case and document it.
-
-## Controller tests
-Read an existing controller test before writing one. Mirror its class, setup, headers, and request format exactly.
-
-**Never assert on hardcoded string or integer values derived from fixtures.** Instead, read the
-value from the fixture object and assert against it:
-```ruby
-# Wrong — brittle, breaks when fixture changes
-assert_equal "06:00–08:00", response.parsed_body.dig("summary", "peak_energy_window")
-assert_equal 437, response.parsed_body.dig("summary", "avg_sleep_duration_minutes")
-
-# Correct — derives expected value from the same source as the code
-expected_window = "#{@health_summary.peak_energy_start_local}–#{@health_summary.peak_energy_end_local}"
-assert_equal expected_window, response.parsed_body.dig("summary", "peak_energy_window")
-
-# Correct — I18n key, not raw string
-assert_equal I18n.t("self_report_alignment.note", self_chronotype: "night", chronotype: @health_summary.chronotype),
-             response.parsed_body.dig("summary", "self_report_alignment", "note")
-```
-
-## Never write model tests
-`test/models/` files are not produced by this flow. Model logic is covered by contract and service tests.
+- **Never guess** timestamps, fixture names, attribute names, or enum values. If you did not read the file that contains them, go back and read it.
+- **Never reconstruct an existing file from memory.** Before outputting a FILE block for an existing file, you must have read its current content during exploration. If you did not read it, note the gap under "Decisions made" instead of guessing.
 
 # Pre-output checklist
 
 Before emitting any FILE block, verify every item:
-
-- [ ] Every method called on a model object inside a serializer `attribute` block exists — confirmed by reading the model's serializer or the model file during exploration.
-- [ ] Every fixture label referenced in tests (`users(:alice)`) was read from the fixture file during exploration — not guessed.
-- [ ] No test asserts a hardcoded string or integer value that came from a fixture — use the fixture object's attribute instead.
-- [ ] Every I18n key used in tests uses `I18n.t(...)`, never a raw English string.
-- [ ] No `validates` or `validate` in any model file.
-- [ ] No response hash built in a service or controller — the serializer shapes JSON.
-- [ ] The controller action contains only: auth check, service call, pattern match, serializer call, render. Nothing else.
-- [ ] The service returns a record or value object — never a hash with display strings.
+- [ ] Every method called on a model object inside a serializer attribute block exists — confirmed by reading the model's serializer or the model file during exploration
+- [ ] Every fixture label referenced in tests was read from the fixture file during exploration — not guessed
+- [ ] No test asserts a hardcoded string or integer value that came from a fixture — use the fixture object's attribute instead
+- [ ] Every I18n key used in tests uses `I18n.t(...)`, never a raw English string
+- [ ] No `validates` or `validate` in any model file
+- [ ] No response hash built in a service or controller — the serializer shapes JSON
+- [ ] The controller action contains only: auth check, service call, pattern match, serializer call, render
+- [ ] The service returns a record or value object — never a hash with display strings
 
 # Output Format
 
 For every file to create or modify, output a FILE block:
-
+```
 FILE: path/to/file.rb
-<complete file content>
+```
 
 Then the PR description:
-
+```
 PR_BODY_START
 ## What this does
-- <bullet per deliverable>
 
 ## Decisions made
-- <decision and rationale, referencing actual class or field names>
 
 ## Alternatives rejected
-- <alternative> — <reason>
+
+—
 
 ## Risks
-- Product: <risk or none>
-- Technical: <risk or none>
+
+**Product:**
+**Technical:**
 PR_BODY_END
+```
 
 # Output Rules
 
-- No markdown fences, no backtick blocks, no commentary outside FILE and PR_BODY blocks.
-- Paths are relative to the application root. Do not include the backend/api/ prefix.
-- Every FILE block contains the complete file, not a diff.
-- Implementation files first, then test files.
-- One test file per new non-model file.
-- Never output a FILE block under test/models/.
-- Never output a FILE block under test/fixtures/.
-- Never add `validates` or `validate` calls to any model file. Models contain enums only.
+- No markdown fences, no backtick blocks, no commentary outside FILE and PR_BODY blocks
+- Paths are relative to the application root — do not include the `backend/api/` prefix
+- Every FILE block contains the complete file, not a diff
+- Implementation files first, then test files
+- One test file per new non-model file
+- Never output a FILE block under `test/models/`
+- Never output a FILE block under `test/fixtures/`
+- Never add `validates` or `validate` calls to any model file
