@@ -1,0 +1,74 @@
+id: extract_rules
+role: |
+  Extract generalizable rules from a PR — combining diff analysis and
+  decisions made in the current chat session — and post them as a
+  <!-- calvin:rules --> comment with checkboxes on the PR in the target repo.
+  Only checked bullets (☑) will be ingested into the RAG vector DB on approval.
+  MUST use templates/pr_rules_comment.md structure.
+  NEVER post without Igor explicit confirmation.
+
+steps:
+  - name: resolve_pr
+    description: |
+      If pr_number is not provided, ask Igor which PR to process.
+      Fetch: PR title, body, diff (github:pr:{{pr_number}}:diff).
+
+  - name: collect_chat_decisions
+    description: |
+      Before reading the diff, ask Igor:
+        "Ci sono decisioni prese in chat in questa sessione che vuoi includere
+        come regole? (es. pattern concordati, vincoli architetturali, scelte di design)"
+
+      Collect Igor's free-text answer. Each decision becomes a rule candidate
+      alongside those extracted from the diff.
+      If Igor says no / nothing, proceed.
+
+  - name: analyze_pr
+    description: |
+      Read the PR diff and body. Identify generalizable rules:
+        - New patterns introduced (service structure, controller conventions,
+          model constraints, migration rules, test conventions, naming)
+        - Explicit decisions stated in the PR body or linked issue
+        - Anything that refines or contradicts an existing convention
+
+      Skip one-off implementation details — a rule must be applicable
+      to future PRs in the same codebase.
+      Skip rules already present in .calvin/conventions.yml.
+
+  - name: draft_rules
+    description: |
+      Merge rules from diff analysis and chat decisions into a single list.
+      Draft the comment using templates/pr_rules_comment.md.
+
+      Per bullet:
+        - [ ] [One clear sentence stating the rule.] Example: `<positive Ruby/Swift snippet>`
+
+      Constraints:
+        - Self-contained: readable with zero context
+        - Positive examples only (✅ what to do)
+        - Max ~400 chars per bullet including the example
+        - 3–8 bullets per PR — quality over quantity
+        - All bullets start as unchecked — Igor checks the ones to ingest
+
+  - name: confirm_with_igor
+    description: |
+      Show the full draft comment to Igor in chat.
+      Iterate until Igor confirms every bullet.
+      Trigger words for confirmation: "ok", "posta", "vai", "post it", "procedi".
+      Remind Igor: "dopo che posto, fai il check sui bullet che vuoi ingestion prima di approvare la PR."
+
+  - name: post_comment
+    description: |
+      Post the confirmed comment on the PR in the target repo (synca).
+      Body is exactly the confirmed draft — no modifications after confirmation.
+      After posting, tell Igor the URL of the comment and remind him to:
+        1. Check (☑) the bullets to ingest on GitHub
+        2. Then approve the PR — the Action will ingest only checked bullets
+
+constraints:
+  - MUST use templates/pr_rules_comment.md. Never free-form.
+  - NEVER post without explicit Igor confirmation.
+  - Generalizable rules only — no one-off implementation details.
+  - Positive examples only — no ❌ anti-patterns in the comment.
+  - All bullets start unchecked — never pre-check any bullet.
+  - Target repo: workspace.target in .agent.yml.
