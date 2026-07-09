@@ -55,3 +55,11 @@ scenarios:
       - user references a PR number
       - user says "review", "guarda la PR", "controlla"
     file: scenarios/review_pr.yml
+
+  - id: extract_rules
+    triggers:
+      - user wants to extract rules from a PR
+      - user says "estrai regole", "extract rules", "regole dalla PR"
+      - user references a PR number and wants to learn from it
+      - user wants to post a calvin:rules comment on a PR
+    file: scenarios/extract_rules.yml
