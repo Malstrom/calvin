@@ -1,52 +1,61 @@
 # frozen_string_literal: true
-# ContextRetriever — recupera chunk rilevanti da Supabase prima del ReActLoop.
+# ContextRetriever — recupera regole rilevanti da Supabase prima del ReActLoop.
 #
-# .call(issue) => String (formatted context) | nil (graceful fallback)
+# Interfaccia pubblica:
+#   ContextRetriever.call(issue) => RetrievalResult
+#
+# RetrievalResult = Data.define(:rules, :context)
+#   .rules   => String formattata con le regole attive, o nil se nessuna trovata
+#   .context => nil (predisposto per source_type futuri)
 #
 # Flusso:
 #   1. Costruisce query testuale da issue.title + issue.body (primi 500 char)
-#   2. Chiama mistral-embed per ottenere l'embedding della query
-#   3. Chiama RPC calvin_similarity_search su Supabase con top_k=5
-#   4. Formatta i chunk come sezione ## Retrieved context
+#   2. Chiama mistral-embed per ottenere l'embedding della query (1024 dim)
+#   3. Chiama RPC calvin_rules_search su Supabase (top_k dal CONFIG o nessun limite)
+#   4. Ritorna RetrievalResult con regole formattate
 #
-# Se SUPABASE_URL o SUPABASE_SERVICE_KEY non sono presenti → nil silenzioso.
-# Se Mistral o Supabase sono down → nil silenzioso.
+# Se SUPABASE_URL o SUPABASE_SERVICE_KEY non sono presenti => .rules = nil silenzioso.
+# Se Mistral o Supabase sono down => .rules = nil silenzioso.
 
 require "net/http"
 require "json"
 
 module Calvin
+  RetrievalResult = Data.define(:rules, :context)
+
   class ContextRetriever
-    TOP_K          = 5
-    EMBED_URL      = URI("https://api.mistral.ai/v1/embeddings")
-    EMBED_MODEL    = "mistral-embed"
-    OPEN_TIMEOUT   = 10
-    READ_TIMEOUT   = 20
+    EMBED_URL    = URI("https://api.mistral.ai/v1/embeddings")
+    OPEN_TIMEOUT = 10
+    READ_TIMEOUT = 20
 
     def self.call(issue)
       new.call(issue)
     end
 
     def call(issue)
-      return nil unless supabase_configured?
+      unless supabase_configured?
+        Calvin::LOG.info "ContextRetriever: Supabase non configurato — skip"
+        return RetrievalResult.new(rules: nil, context: nil)
+      end
 
       query     = build_query(issue)
       Calvin::LOG.info "ContextRetriever: query = #{query[0..120]}..."
 
       embedding = embed(query)
-      chunks    = search(embedding)
+      chunks    = search_rules(embedding)
 
       if chunks.empty?
-        Calvin::LOG.info "ContextRetriever: nessun chunk trovato"
-        return nil
+        Calvin::LOG.info "ContextRetriever: nessuna regola trovata"
+        return RetrievalResult.new(rules: nil, context: nil)
       end
 
-      Calvin::LOG.info "ContextRetriever: #{chunks.size} chunk(s) recuperati"
+      Calvin::LOG.info "ContextRetriever: #{chunks.size} regola/e recuperata/e"
       log_chunks(chunks)
-      format_chunks(chunks)
+
+      RetrievalResult.new(rules: format_rules(chunks), context: nil)
     rescue => e
       Calvin::LOG.warn "ContextRetriever: fallback silenzioso (#{e.message})"
-      nil
+      RetrievalResult.new(rules: nil, context: nil)
     end
 
     private
@@ -61,16 +70,18 @@ module Calvin
     end
 
     def embed(text)
+      embed_model = rag_config(:embed_model) || "mistral-embed"
+
       http              = Net::HTTP.new(EMBED_URL.host, EMBED_URL.port)
       http.use_ssl      = true
       http.open_timeout = OPEN_TIMEOUT
       http.read_timeout = READ_TIMEOUT
 
-      req                       = Net::HTTP::Post.new(EMBED_URL)
-      req["Content-Type"]       = "application/json"
-      req["Authorization"]      = "Bearer #{ENV.fetch('MISTRAL_API_KEY')}"
-      req["Accept-Encoding"]    = "identity"
-      req.body                  = { model: EMBED_MODEL, input: [text] }.to_json
+      req                    = Net::HTTP::Post.new(EMBED_URL)
+      req["Content-Type"]    = "application/json"
+      req["Authorization"]   = "Bearer #{ENV.fetch('MISTRAL_API_KEY')}"
+      req["Accept-Encoding"] = "identity"
+      req.body               = { model: embed_model, input: [text] }.to_json
 
       resp = http.request(req)
       raise "Mistral embed error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
@@ -78,21 +89,26 @@ module Calvin
       JSON.parse(resp.body).dig("data", 0, "embedding")
     end
 
-    def search(embedding)
-      repo = Calvin::REPO
-      url  = URI("#{ENV['SUPABASE_URL']}/rest/v1/rpc/calvin_similarity_search")
+    def search_rules(embedding)
+      repo  = Calvin::REPO
+      limit = rag_config(:top_k_rules)
+
+      url = URI("#{ENV['SUPABASE_URL']}/rest/v1/rpc/calvin_rules_search")
 
       http              = Net::HTTP.new(url.host, url.port)
       http.use_ssl      = url.scheme == "https"
       http.open_timeout = OPEN_TIMEOUT
       http.read_timeout = READ_TIMEOUT
 
-      req                       = Net::HTTP::Post.new(url)
-      req["Content-Type"]       = "application/json"
-      req["apikey"]             = ENV["SUPABASE_SERVICE_KEY"]
-      req["Authorization"]      = "Bearer #{ENV['SUPABASE_SERVICE_KEY']}"
-      req["Accept-Encoding"]    = "identity"
-      req.body                  = { query_embedding: embedding, target_repo: repo, match_count: TOP_K }.to_json
+      params = { query_embedding: embedding, target_repo: repo }
+      params[:match_count] = limit if limit
+
+      req                    = Net::HTTP::Post.new(url)
+      req["Content-Type"]    = "application/json"
+      req["apikey"]          = ENV["SUPABASE_SERVICE_KEY"]
+      req["Authorization"]   = "Bearer #{ENV['SUPABASE_SERVICE_KEY']}"
+      req["Accept-Encoding"] = "identity"
+      req.body               = params.to_json
 
       resp = http.request(req)
       raise "Supabase RPC error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
@@ -101,30 +117,29 @@ module Calvin
     end
 
     def log_chunks(chunks)
-      Calvin::LOG.info "ContextRetriever: ===== CHUNK RETRIEVED ====="
+      Calvin::LOG.info "ContextRetriever: ===== RULES RETRIEVED ====="
       chunks.each_with_index do |chunk, i|
-        source_type = chunk["source_type"] || "doc"
         source_path = chunk["source_path"] || "unknown"
         similarity  = chunk["similarity"] ? format("%.4f", chunk["similarity"]) : "n/a"
         content     = chunk["content"].to_s.strip
-        Calvin::LOG.info "ContextRetriever: [#{i + 1}/#{chunks.size}] #{source_type}:#{source_path} (similarity=#{similarity})"
+        Calvin::LOG.info "ContextRetriever: [#{i + 1}/#{chunks.size}] #{source_path} (similarity=#{similarity})"
         Calvin::LOG.info "ContextRetriever: #{content}"
         Calvin::LOG.info "ContextRetriever: -----"
       end
-      Calvin::LOG.info "ContextRetriever: ===== END CHUNKS ====="
+      Calvin::LOG.info "ContextRetriever: ===== END RULES ====="
     end
 
-    def format_chunks(chunks)
-      lines = ["## Retrieved context", ""]
+    def format_rules(chunks)
+      lines = ["## Active rules", ""]
       chunks.each do |chunk|
-        source_type = chunk["source_type"] || "doc"
-        source_path = chunk["source_path"] || "unknown"
-        content     = chunk["content"].to_s.strip
-        lines << "### [#{source_type}] #{source_path}"
-        lines << content
-        lines << ""
+        content = chunk["content"].to_s.strip
+        lines << "- #{content}"
       end
       lines.join("\n")
+    end
+
+    def rag_config(key)
+      Calvin::CONFIG.dig(:rag, key) || Calvin::CONFIG.dig(:rag, key.to_s)
     end
   end
 end
