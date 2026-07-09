@@ -8,7 +8,7 @@
 # Flusso:
 #   1. RulesFetcher legge i commenti della PR, trova <!-- calvin:rules -->
 #   2. Estrae solo i bullet checkati (- [x])
-#   3. Per ogni bullet: embedding → dedup check → upsert o skip
+#   3. Per ogni bullet: embedding -> dedup check -> upsert o skip
 #   4. Log completo di ogni chunk (contenuto intero + esito)
 
 require "optparse"
@@ -17,10 +17,13 @@ require_relative "../lib/ingestion/rules_fetcher"
 require_relative "../lib/ingestion/embedder"
 require_relative "../lib/ingestion/supabase_store"
 
-EMBED_RATE_DELAY  = 1.2   # seconds — Mistral free tier ~1 req/s
-DEDUP_THRESHOLD   = 0.92  # similarità minima per considerare un chunk duplicato
+EMBED_RATE_DELAY = 1.2  # seconds — Mistral free tier ~1 req/s
 
-# ── CLI ─────────────────────────────────────────────────────────────────────────────────
+DEDUP_THRESHOLD = Calvin::CONFIG.dig(:rag, :dedup_threshold) ||
+                  Calvin::CONFIG.dig(:rag, "dedup_threshold") ||
+                  0.92
+
+# ── CLI ──────────────────────────────────────────────────────────────────────
 options = {}
 OptionParser.new do |opts|
   opts.banner = "Usage: ruby bin/ingest.rb --repo OWNER/REPO --pr NUMBER"
@@ -40,7 +43,7 @@ total_upserted = 0
 total_skipped  = 0
 errors         = []
 
-# ── FETCH RULES ─────────────────────────────────────────────────────────────────────────
+# ── FETCH RULES ──────────────────────────────────────────────────────────────
 puts "[ingest] Fetching rules from PR ##{pr_number} in #{repo}..."
 
 chunks = Ingestion::RulesFetcher.from_pr(repo, pr_number)
@@ -53,7 +56,7 @@ end
 puts "[ingest] #{chunks.size} rule(s) to process"
 puts ""
 
-# ── PROCESS EACH CHUNK ───────────────────────────────────────────────────────────────────
+# ── PROCESS EACH CHUNK ───────────────────────────────────────────────────────
 chunks.each do |chunk|
   puts "[ingest] ── #{chunk[:source_path]} ─" * 2
   chunk[:content].each_line { |l| puts "[ingest] #{l.rstrip}" }
@@ -63,19 +66,19 @@ chunks.each do |chunk|
     sleep EMBED_RATE_DELAY
     embedding = embedder.embed(chunk[:content])
 
-    # — dedup check —————————————————————————————————————————————
+    # — dedup check ───────────────────────────────────────────────────────────
     similar = store.similar_to(embedding, repo: repo, threshold: DEDUP_THRESHOLD, limit: 1)
 
     if similar.any?
       existing = similar.first
       puts "[ingest] → SKIPPED (similar chunk exists)"
-      puts "[ingest]   match:      #{existing['source_path']} (similarity=#{format('%.4f', existing['similarity'])})"
-      puts "[ingest]   existing:   #{existing['content'].to_s.lines.map(&:rstrip).join("\n[ingest]               ")}"
+      puts "[ingest]   match:    #{existing['source_path']} (similarity=#{format('%.4f', existing['similarity'])})"
+      puts "[ingest]   existing: #{existing['content'].to_s.lines.map(&:rstrip).join("\n[ingest]             ")}"
       total_skipped += 1
       next
     end
 
-    # — upsert —————————————————————————————————————————————————
+    # — upsert ────────────────────────────────────────────────────────────────
     store.upsert(
       repo:        repo,
       source_type: chunk[:source_type],
@@ -94,7 +97,7 @@ chunks.each do |chunk|
   puts ""
 end
 
-# ── SUMMARY ─────────────────────────────────────────────────────────────────────────────
+# ── SUMMARY ──────────────────────────────────────────────────────────────────
 puts "[ingest] ✅ Done. upserted=#{total_upserted} skipped=#{total_skipped} errors=#{errors.size}"
 errors.each { |e| puts "  ✗ #{e}" }
 exit(errors.any? ? 1 : 0)

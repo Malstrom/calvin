@@ -3,8 +3,7 @@
 # Pipeline dry-transaction con 5 step espliciti:
 #
 #   build_prompt      — ContextBuilder costruisce il prompt dal title+body dell'issue
-#   retrieve_context  — ContextRetriever: query RAG su Supabase, arricchisce il prompt
-#                       (DISABILITATO — vedi commento nello step)
+#   retrieve_context  — ContextRetriever: query RAG su Supabase, ritorna RetrievalResult
 #   react_loop        — ReActLoop: il modello esplora e implementa
 #   parse_files       — estrae FILE: blocks e PR_BODY
 #   commit_and_pr     — branch + commit + PR
@@ -21,16 +20,13 @@
 require "dry/transaction"
 require_relative "context_builder"
 require_relative "context_retriever"
-require_relative "file_parser"
 require_relative "react_loop"
+require_relative "file_parser"
 require_relative "commit_and_pr"
 
 module Calvin
   class ExploreFlow
     include Dry::Transaction
-
-    KNOWN_STACKS  = (Calvin::CONFIG.dig(:repo, :stacks, :known)  || %w[rails flutter]).map(&:to_s).freeze
-    DEFAULT_STACK = (Calvin::CONFIG.dig(:repo, :stacks, :default) || "rails").to_s.freeze
 
     step :build_prompt
     step :retrieve_context
@@ -38,101 +34,79 @@ module Calvin
     step :parse_files
     step :commit_and_pr
 
-    def self.run(github, issue)
-      new.call(github: github, issue: issue)
-    end
-
     private
 
-    def build_prompt(github:, issue:)
-      prompt = ContextBuilder.build(issue, github_client: github)
-      Success(github: github, issue: issue, prompt: prompt)
+    def build_prompt(issue:, stack:, github:)
+      prompt = ContextBuilder.build(issue)
+      Calvin::LOG.info "ExploreFlow: prompt built (#{prompt.bytesize} bytes)"
+      Success(issue: issue, stack: stack, github: github, prompt: prompt)
     rescue => e
-      Failure(step: :build_prompt, error: e.message, usage: nil, explore_turns: nil)
+      Failure(step: :build_prompt, error: e.message, usage: nil, explore_turns: 0)
     end
 
-    # TODO: RAG disabilitato temporaneamente.
-    # Il contesto vettoriale veniva iniettato nel prompt prima della fase ReAct,
-    # ma i chunk recuperati (docs/architecture, ios-setup, ml-architecture, ecc.)
-    # non aggiungono valore utile rispetto a ciò che il modello scopre autonomamente
-    # leggendo il repo via read_file/list_dir durante l'esplorazione.
-    # Da rivalutare quando il DB vettoriale conterrà chunk di codice sorgente
-    # (controllers, services, serializers) invece di sola documentazione.
-    def retrieve_context(github:, issue:, prompt:)
-      # context = ContextRetriever.call(issue)
-      # enriched = context ? "#{context}\n\n#{prompt}" : prompt
-      Calvin::LOG.info "retrieve_context: RAG disabilitato, prompt invariato"
-      Success(github: github, issue: issue, prompt: prompt)
+    def retrieve_context(issue:, stack:, github:, prompt:)
+      retrieval = ContextRetriever.call(issue)
+      Calvin::LOG.info "ExploreFlow: retrieval done — rules=#{retrieval.rules.nil? ? 'nil' : "#{retrieval.rules.bytesize}b"}"
+      Success(issue: issue, stack: stack, github: github, prompt: prompt, retrieval: retrieval)
     rescue => e
-      Calvin::LOG.warn "retrieve_context: errore non fatale (#{e.message}), continuo senza RAG"
-      Success(github: github, issue: issue, prompt: prompt)
+      Calvin::LOG.warn "ExploreFlow: ContextRetriever failed (#{e.message}) — continuing without rules"
+      empty = RetrievalResult.new(rules: nil, context: nil)
+      Success(issue: issue, stack: stack, github: github, prompt: prompt, retrieval: empty)
     end
 
-    def react_loop(github:, issue:, prompt:)
-      stack = detect_stack(issue)
-      Calvin::LOG.info "ExploreFlow: avvio ReActLoop per issue ##{issue.number} (stack=#{stack})"
-      result = ReActLoop.new(github, prompt, stack: stack).run
-      Calvin::LOG.info "ReActLoop terminato in #{result[:turns]} turn(s)"
+    def react_loop(issue:, stack:, github:, prompt:, retrieval:)
+      loop = ReActLoop.new(github, prompt, stack: stack, retrieval: retrieval)
+      result = loop.run
+      Calvin::LOG.info "ExploreFlow: react_loop done — turns=#{result[:turns]}"
       Success(
-        github:        github,
         issue:         issue,
+        stack:         stack,
+        github:        github,
         content:       result[:content],
         usage:         result[:usage],
+        temperature:   result[:temperature],
         explore_turns: result[:turns]
       )
     rescue => e
-      Failure(step: :react_loop, error: e.message, usage: nil, explore_turns: nil)
+      Failure(step: :react_loop, error: e.message, usage: nil, explore_turns: 0)
     end
 
-    def parse_files(github:, issue:, content:, usage:, explore_turns:)
-      files = FileParser.parse(content)
-      if files.empty?
-        return Failure(step: :parse_files, error: "nessun FILE: block prodotto dal modello", usage: usage, explore_turns: explore_turns)
-      end
-
-      Calvin::LOG.info "parse_files: #{files.size} file(s) generati da Codestral:"
-      files.each { |f| Calvin::LOG.info "  \u2192 #{f[:path]}" }
-
-      pr_body = FileParser.parse_pr_body(content)
+    def parse_files(issue:, stack:, github:, content:, usage:, temperature:, explore_turns:)
+      parsed = FileParser.parse(content)
+      Calvin::LOG.info "ExploreFlow: parsed #{parsed[:files].size} file(s)"
       Success(
-        github:        github,
         issue:         issue,
-        files:         files,
-        pr_body:       pr_body,
+        github:        github,
+        files:         parsed[:files],
+        pr_body:       parsed[:pr_body],
         usage:         usage,
+        temperature:   temperature,
         explore_turns: explore_turns
       )
     rescue => e
       Failure(step: :parse_files, error: e.message, usage: usage, explore_turns: explore_turns)
     end
 
-    def commit_and_pr(github:, issue:, files:, pr_body:, usage:, explore_turns:)
+    def commit_and_pr(issue:, github:, files:, pr_body:, usage:, temperature:, explore_turns:)
       result = CommitAndPr.call(
-        files:       files,
         issue:       issue,
         github:      github,
+        files:       files,
+        pr_body:     pr_body,
         usage:       usage,
-        description: pr_body
+        temperature: temperature
       )
-      return Failure(result.failure.merge(explore_turns: explore_turns)) if result.failure?
-
-      v = result.value!
-      Success(
-        Calvin::FlowResult.success(
-          files:       v[:files],
-          branch:      v[:branch],
-          pr_url:      v[:pr_url],
-          usage:       usage,
-          flow_meta:   { explore_turns: explore_turns }
-        )
-      )
+      Success(FlowResult.new(
+        files:       result[:files],
+        branch:      result[:branch],
+        status:      result[:status],
+        usage:       usage,
+        temperature: temperature,
+        pr_url:      result[:pr_url],
+        flow_meta:   { explore_turns: explore_turns }
+      ))
     rescue => e
       Failure(step: :commit_and_pr, error: e.message, usage: usage, explore_turns: explore_turns)
-    end
-
-    def detect_stack(issue)
-      labels = issue.labels.map(&:name)
-      KNOWN_STACKS.find { |s| labels.include?(s) } || DEFAULT_STACK
     end
   end
 end

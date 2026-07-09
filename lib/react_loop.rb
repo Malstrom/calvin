@@ -5,20 +5,20 @@
 #
 #   FASE 1 — EXPLORE (multi-turn)
 #     Il modello esplora il repo tramite tool calls JSON.
-#     system: config/prompts/{stack}/explore_system.md
+#     system: config/prompts/{stack}/explore_system.md + rules iniettate in cima
 #     Termina quando il modello chiama done() o si raggiunge MAX_TURNS.
 #     temperature: sampling.temperature.explore (default 0.1)
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
-#     system: config/prompts/{stack}/implement_system.md
+#     system: config/prompts/{stack}/implement_system.md + rules iniettate in fondo
 #     user:   prompt issue + observations collassate dall'esplorazione
 #     Il modello scrive i FILE: blocks e il PR_BODY.
 #     temperature: sampling.temperature.implement (default 0.0)
 #
 # Tool disponibili durante l'esplorazione:
-#   read_file(path)  → contenuto file o errore
-#   list_dir(path)   → lista nomi nella directory
-#   done()           → termina l'esplorazione e avvia implement_phase
+#   read_file(path)  -> contenuto file o errore
+#   list_dir(path)   -> lista nomi nella directory
+#   done()           -> termina l'esplorazione e avvia implement_phase
 #
 # Formato risposta modello durante esplorazione (sempre JSON su una riga):
 #   {"thought": "...", "tool": "...", "args": {...}}
@@ -26,7 +26,7 @@
 # Stack determinato dalla label dell'issue ("rails" | "flutter").
 # Default: "rails".
 #
-# .run → { content: String, turns: Integer, usage: Hash | nil, temperature: Float }
+# .run -> { content: String, turns: Integer, usage: Hash | nil, temperature: Float }
 
 require "json"
 require_relative "file_parser"
@@ -39,18 +39,19 @@ module Calvin
 
     PROMPTS_DIR = File.expand_path("../../config/prompts", __FILE__)
 
-    def initialize(github, issue_prompt, stack: "rails")
+    def initialize(github, issue_prompt, stack: "rails", retrieval: nil)
       @github       = github
       @issue_prompt = issue_prompt
       @stack        = stack
+      @retrieval    = retrieval || RetrievalResult.new(rules: nil, context: nil)
       @mistral      = MistralClient.new
       @observations     = []
       @json_failures    = 0
       @not_found_streak = 0
 
-      sampling           = Calvin::CONFIG.dig(:sampling, :temperature) || {}
-      @temp_explore      = sampling[:explore]    || sampling["explore"]    || 0.1
-      @temp_implement    = sampling[:implement]  || sampling["implement"]  || 0.0
+      sampling        = Calvin::CONFIG.dig(:sampling, :temperature) || {}
+      @temp_explore   = sampling[:explore]   || sampling["explore"]   || 0.1
+      @temp_implement = sampling[:implement] || sampling["implement"] || 0.0
 
       setup_messages
     end
@@ -71,7 +72,7 @@ module Calvin
     private
 
     def setup_messages
-      explore_system = load_explore_system
+      explore_system = build_explore_system
       Calvin::LOG.info "context[explore_system]: #{explore_system[0..19].inspect}"
       Calvin::LOG.info "context[issue_prompt]:   #{@issue_prompt[0..19].inspect}"
 
@@ -82,27 +83,36 @@ module Calvin
     end
 
     # ---------------------------------------------------------------------------
-    # Prompt loading
+    # Prompt assembly
     # ---------------------------------------------------------------------------
 
-    def load_explore_system
-      path    = File.join(PROMPTS_DIR, @stack, "explore_system.md")
-      content = File.read(path, encoding: "UTF-8")
-      Calvin::LOG.info "ReActLoop: loaded explore_system for stack=#{@stack} (#{content.bytesize} bytes)"
-      content
-    rescue Errno::ENOENT
-      Calvin::LOG.warn "ReActLoop: explore_system.md not found for stack=#{@stack}, using rails fallback"
-      File.read(File.join(PROMPTS_DIR, "rails", "explore_system.md"), encoding: "UTF-8")
+    # Fase 1: rules subito dopo # Role, prima del processo (recency bias: le regole
+    # guidano *cosa leggere* durante l'esplorazione)
+    def build_explore_system
+      base = load_prompt("explore_system.md")
+      return base unless @retrieval.rules
+
+      rules_section = "# Active rules\n\n#{@retrieval.rules}\n"
+      # Inserisce dopo la prima riga che inizia con "# Role"
+      base.sub(/(# Role[^\n]*\n)/, "\\1\n#{rules_section}\n")
     end
 
-    def load_implement_system
-      path    = File.join(PROMPTS_DIR, @stack, "implement_system.md")
+    # Fase 2: rules in fondo al prompt (recency bias Mistral: ultimo letto = vincoli)
+    def build_implement_system
+      base = load_prompt("implement_system.md")
+      return base unless @retrieval.rules
+
+      base.rstrip + "\n\n# Active rules\n\n#{@retrieval.rules}\n"
+    end
+
+    def load_prompt(filename)
+      path    = File.join(PROMPTS_DIR, @stack, filename)
       content = File.read(path, encoding: "UTF-8")
-      Calvin::LOG.info "ReActLoop: loaded implement_system for stack=#{@stack} (#{content.bytesize} bytes)"
+      Calvin::LOG.info "ReActLoop: loaded #{filename} for stack=#{@stack} (#{content.bytesize} bytes)"
       content
     rescue Errno::ENOENT
-      Calvin::LOG.warn "ReActLoop: implement_system.md not found for stack=#{@stack}, using rails fallback"
-      File.read(File.join(PROMPTS_DIR, "rails", "implement_system.md"), encoding: "UTF-8")
+      Calvin::LOG.warn "ReActLoop: #{filename} not found for stack=#{@stack}, using rails fallback"
+      File.read(File.join(PROMPTS_DIR, "rails", filename), encoding: "UTF-8")
     end
 
     # ---------------------------------------------------------------------------
@@ -127,7 +137,6 @@ module Calvin
       observation = dispatch_tool(tool, args)
       Calvin::LOG.info "observation (#{tool}): #{observation[0..80]}"
 
-      # Log preview del contenuto letto (read_file)
       if tool == "read_file" && !observation.start_with?("ERROR:")
         Calvin::LOG.info "context[#{args['path']}]: #{observation[0..19].inspect}"
       end
@@ -175,7 +184,7 @@ module Calvin
     def implement_phase(turns)
       Calvin::LOG.info "implement_phase after #{turns} explore turn(s) (temp=#{@temp_implement})"
 
-      implement_system = load_implement_system
+      implement_system = build_implement_system
       Calvin::LOG.info "context[implement_system]: #{implement_system[0..19].inspect}"
 
       implement_user = build_implement_user
@@ -241,19 +250,13 @@ module Calvin
       "ERROR: #{e.message}"
     end
 
-    # Estrae e parsa il primo oggetto JSON completo dalla risposta del modello.
-    # Gestisce sia JSON su singola riga che multi-riga (flag /m).
     def parse_action(raw)
       cleaned = raw.strip
                    .gsub(/\A```(?:json)?\n?/, "")
                    .gsub(/\n?```\z/, "")
 
-      # Tentativo 1: il contenuto è già JSON valido (caso single-line o blocco pulito)
-      if cleaned.strip.start_with?("{")
-        return JSON.parse(cleaned.strip)
-      end
+      return JSON.parse(cleaned.strip) if cleaned.strip.start_with?("{")
 
-      # Tentativo 2: estrae il primo blocco {...} bilanciato con dotall
       if (m = cleaned.match(/(\{.+\})/m))
         return JSON.parse(m[1])
       end
