@@ -6,6 +6,7 @@
 #   ruby bin/ingest.rb --repo Malstrom/synca
 #   ruby bin/ingest.rb --repo Malstrom/synca --only docs
 #   ruby bin/ingest.rb --repo Malstrom/synca --only pr
+#   ruby bin/ingest.rb --repo Malstrom/synca --only pr --pr 42
 
 require "optparse"
 require "base64"
@@ -30,19 +31,21 @@ rescue Octokit::NotFound
 end
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
-options = { only: nil }
+options = { only: nil, pr_number: nil }
 OptionParser.new do |opts|
-  opts.banner = "Usage: ruby bin/ingest.rb --repo OWNER/REPO [--only docs|pr]"
-  opts.on("--repo REPO", "Target repo (e.g. Malstrom/synca)") { |v| options[:repo] = v }
-  opts.on("--only TYPE", "Ingest only 'docs' or 'pr'") { |v| options[:only] = v }
+  opts.banner = "Usage: ruby bin/ingest.rb --repo OWNER/REPO [--only docs|pr] [--pr NUMBER]"
+  opts.on("--repo REPO",   "Target repo (e.g. Malstrom/synca)") { |v| options[:repo]      = v }
+  opts.on("--only TYPE",   "Ingest only 'docs' or 'pr'")        { |v| options[:only]      = v }
+  opts.on("--pr NUMBER",   "Ingest a single PR by number")      { |v| options[:pr_number] = v.to_i }
 end.parse!
 
 raise "--repo is required" unless options[:repo]
 
-repo     = options[:repo]
-only     = options[:only]
-store    = Ingestion::SupabaseStore.new
-embedder = Ingestion::Embedder.new
+repo      = options[:repo]
+only      = options[:only]
+pr_number = options[:pr_number]
+store     = Ingestion::SupabaseStore.new
+embedder  = Ingestion::Embedder.new
 
 total_chunks  = 0
 total_upserts = 0
@@ -92,8 +95,14 @@ end
 
 # ── PR ────────────────────────────────────────────────────────────────────────
 unless only == "docs"
-  puts "[ingest] Fetching merged PRs from #{repo}..."
-  prs = Ingestion::PrFetcher.merged_since(repo, days: 90)
+  prs = if pr_number
+    puts "[ingest] Fetching single PR ##{pr_number} from #{repo}..."
+    [Ingestion::PrFetcher.single(repo, pr_number)].compact
+  else
+    puts "[ingest] Fetching merged PRs from #{repo}..."
+    Ingestion::PrFetcher.merged_since(repo, days: 90)
+  end
+
   prs.each do |pr|
     begin
       sleep EMBED_RATE_DELAY
