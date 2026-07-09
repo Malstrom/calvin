@@ -3,10 +3,9 @@
 # Estratto da commit_and_pr.rb — singola responsabilità.
 #
 # Struttura body:
-#   1. Description prodotta da Codestral (o placeholder)
+#   1. Description prodotta da Codestral (include What/Decisions/Rules applied/Rule candidates)
 #   2. Token usage (se disponibile)
-#   3. Approval checkbox per il reviewer
-#   4. Footer: "Implemented by Calvin via Codestral <version>" + "Closes #N"
+#   3. Footer: "Implemented by Calvin via Codestral <version>" + "Closes #N"
 #
 # Uso:
 #   Calvin::PrBodyBuilder.build(issue:, usage:, description:)          → String (PR body)
@@ -14,8 +13,6 @@
 
 module Calvin
   module PrBodyBuilder
-    APPROVAL_CHECKBOX = "- [ ] Approved"
-
     def self.build(issue:, usage:, description: nil)
       model_version = Calvin::MODEL.to_s
 
@@ -26,7 +23,6 @@ module Calvin
       parts = []
       parts << description_section
       parts << token_table(usage) if usage
-      parts << APPROVAL_CHECKBOX
       parts << "---"
       parts << "Implemented by Calvin via Codestral (`#{model_version}`)."
       parts << "Closes ##{issue.number}"
@@ -41,9 +37,8 @@ module Calvin
       parts = []
       parts << review_text.to_s.strip unless review_text.to_s.strip.empty?
       parts << token_table(usage) if usage
-      parts << APPROVAL_CHECKBOX
       parts << "---"
-      parts << "Implemented by Calvin via Codestral (`#{model_version}`)."
+      parts << "Reviewed by Calvin via Codestral (`#{model_version}`)."
 
       parts.join("\n\n")
     end

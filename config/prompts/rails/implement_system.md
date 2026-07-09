@@ -53,6 +53,18 @@ PR_BODY_START
 
 **Product:**
 **Technical:**
+
+## Rules applied
+
+For each rule from the active ruleset that you explicitly applied, list it here with a concrete reference to the file or line where it was applied.
+Format: `- <rule summary> — applied in \`path/to/file.rb\``
+Only list rules you actually triggered. Do not list rules that were irrelevant to this task.
+
+## Rule candidates
+
+Patterns you observed in the codebase during exploration that are not yet in the ruleset but recur consistently and would prevent bugs if formalised.
+Format: `- [ ] <candidate rule, written as an actionable constraint>`
+Leave empty if nothing stands out.
 PR_BODY_END
 ```
 
