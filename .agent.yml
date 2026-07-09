@@ -27,7 +27,6 @@ architecture:
   routing: ModeRouter.for_labels(labels) → mode symbol
   modes:
     explore_issue: label calvin on synca issue
-    pr_review: label calvin-fix on synca PR
     unknown: exit(1)
   explore_flow:
     steps:
@@ -42,12 +41,6 @@ architecture:
     post_steps:
       - RubocopAutocorrect
       - RunReporter
-  pr_review_flow:
-    steps:
-      - BacktraceExtractor
-      - fetch_snippet (±20 lines around backtrace line)
-      - single LLM call — pr_review_system.md
-      - FileParser + commit on PR branch
   flow_result:
     required_fields: [files, branch, status]
     optional_fields: [usage, temperature, pr_url]
@@ -63,7 +56,6 @@ repo_structure:
   lib/post_steps.rb: Calvin::PostSteps.run
   lib/react_loop.rb: ReActLoop — multi-turn explore + single implement call
   lib/explore_flow.rb: ExploreFlow orchestrator
-  lib/pr_review_flow.rb: PrReviewFlow orchestrator
   lib/context_builder.rb: builds issue prompt string
   lib/file_parser.rb: parses FILE: blocks from LLM output
   lib/commit_and_pr.rb: commits parsed files + opens PR on synca
@@ -76,7 +68,6 @@ repo_structure:
   config/calvin.yml: ALL runtime constants
   config/prompts/rails/explore_system.md: system prompt PHASE 1
   config/prompts/rails/implement_system.md: system prompt PHASE 2
-  config/prompts/rails/pr_review_system.md: system prompt PrReviewFlow
 
 prompt_files:
   explore_system.md:
@@ -90,9 +81,6 @@ prompt_files:
       - rule order matters — Mistral weights end of prompt (recency bias)
       - "except models" is in Output format section, adjacent to "tests are mandatory"
       - domain rules: migration version, enum-only models, contract validation, controller pattern (case/in), service monads, fixture safety
-  pr_review_system.md:
-    path: config/prompts/rails/pr_review_system.md
-    used_in: PrReviewFlow — single call
 
 target_repo:
   name: synca
@@ -131,6 +119,9 @@ known_issues:
   refactoring_issue_17:
     status: completed 2026-07-06
     summary: ModeRouter, FlowResult, PostSteps, RubocopRunner extracted; constants moved to calvin.yml; issue_commenter.rb deleted
+  calvin_fix_removed:
+    status: completed 2026-07-08
+    summary: PrReviewFlow and calvin-fix label removed — only explore_issue flow remains
 
 scenarios:
   spec: .scenarios.yml
