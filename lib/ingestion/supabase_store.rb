@@ -1,7 +1,9 @@
 # frozen_string_literal: true
-# SupabaseStore — upsert chunk su Supabase via REST API.
+# SupabaseStore — upsert e similarity search chunk su Supabase via REST API.
 #
 # Ingestion::SupabaseStore.new.upsert(repo:, source_type:, source_path:, content:, embedding:)
+# Ingestion::SupabaseStore.new.similar_to(embedding, repo:, threshold: 0.92, limit: 1)
+# => [{ "source_path" => "rule/38/2", "content" => "...", "similarity" => 0.9431 }]
 #
 # Usa l'header "Prefer: resolution=merge-duplicates" per fare upsert automatico
 # sul constraint unique(repo, source_path) — idempotente.
@@ -26,16 +28,11 @@ module Ingestion
 
     def upsert(repo:, source_type:, source_path:, content:, embedding:)
       uri  = URI("#{@url}/rest/v1/calvin_chunks")
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl      = true
-      http.open_timeout = OPEN_TIMEOUT
-      http.read_timeout = READ_TIMEOUT
+      http = build_http(uri)
 
-      req                       = Net::HTTP::Post.new(uri)
-      req["Content-Type"]       = "application/json"
-      req["Authorization"]      = "Bearer #{@key}"
-      req["apikey"]             = @key
-      req["Prefer"]             = "resolution=merge-duplicates"
+      req              = Net::HTTP::Post.new(uri)
+      set_headers(req)
+      req["Prefer"] = "resolution=merge-duplicates"
 
       req.body = {
         repo:        repo,
@@ -50,6 +47,46 @@ module Ingestion
       raise "Supabase upsert error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
       true
+    end
+
+    # Cerca chunk semanticamente simili a embedding.
+    # Usa la stessa RPC calvin_similarity_search del ContextRetriever.
+    # Ritorna array di hash con source_path, content, similarity.
+    def similar_to(embedding, repo:, threshold: 0.92, limit: 1)
+      uri  = URI("#{@url}/rest/v1/rpc/calvin_similarity_search")
+      http = build_http(uri)
+
+      req = Net::HTTP::Post.new(uri)
+      set_headers(req)
+
+      req.body = {
+        query_embedding: embedding,
+        target_repo:     repo,
+        match_count:     limit
+      }.to_json
+
+      resp = http.request(req)
+      raise "Supabase similarity error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
+
+      results = JSON.parse(resp.body)
+      results.select { |r| r["similarity"].to_f >= threshold }
+    end
+
+    private
+
+    def build_http(uri)
+      http              = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl      = true
+      http.open_timeout = OPEN_TIMEOUT
+      http.read_timeout = READ_TIMEOUT
+      http
+    end
+
+    def set_headers(req)
+      req["Content-Type"]    = "application/json"
+      req["Authorization"]   = "Bearer #{@key}"
+      req["apikey"]          = @key
+      req["Accept-Encoding"] = "identity"
     end
   end
 end
