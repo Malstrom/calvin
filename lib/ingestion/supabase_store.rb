@@ -50,10 +50,10 @@ module Ingestion
     end
 
     # Cerca chunk semanticamente simili a embedding.
-    # Usa la stessa RPC calvin_similarity_search del ContextRetriever.
+    # Usa la RPC calvin_rules_search definita nel DB Supabase.
     # Ritorna array di hash con source_path, content, similarity.
     def similar_to(embedding, repo:, threshold: 0.92, limit: 1)
-      uri  = URI("#{@url}/rest/v1/rpc/calvin_similarity_search")
+      uri  = URI("#{@url}/rest/v1/rpc/calvin_rules_search")
       http = build_http(uri)
 
       req = Net::HTTP::Post.new(uri)
