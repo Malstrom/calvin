@@ -12,7 +12,7 @@
 
 require_relative "../lib/boot"
 
-# ── Issue context ──────────────────────────────────────────────────────────────
+# ── Issue context ────────────────────────────────────────────────────────────────────────
 temp_github = Calvin::GitHubClient.new
 
 issue  = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
@@ -30,7 +30,8 @@ Calvin::LOG.info "mode: #{mode}"
 
 case mode
 in :explore_issue
-  result = Calvin::ExploreFlow.run(github, issue)
+  stack  = labels.include?("flutter") ? "flutter" : "rails"
+  result = Calvin::ExploreFlow.new.call(issue: issue, github: github, stack: stack)
   Calvin::PostSteps.run(
     result,
     github:   github,
