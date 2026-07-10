@@ -89,13 +89,16 @@ module Calvin
     end
 
     def commit_and_pr(issue:, github:, files:, pr_body:, usage:, temperature:, explore_turns:)
-      result = CommitAndPr.call(
+      outcome = CommitAndPr.call(
         issue:       issue,
         github:      github,
         files:       files,
         usage:       usage,
         description: pr_body
       )
+      return Failure(step: :commit_and_pr, error: outcome.failure[:error], usage: usage, explore_turns: explore_turns) if outcome.failure?
+
+      result = outcome.value!
       Success(FlowResult.new(
         files:       result[:files],
         branch:      result[:branch],
