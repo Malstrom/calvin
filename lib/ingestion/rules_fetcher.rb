@@ -1,15 +1,15 @@
 # frozen_string_literal: true
-# RulesFetcher — estrae le regole checkate dal commento <!-- calvin:rules --> di una PR.
+# RulesFetcher — estrae le regole checkate dai commenti <!-- calvin:rules --> di una PR.
 #
 # Ingestion::RulesFetcher.from_pr("Malstrom/synca", 42)
 # => [
-#   { source_type: "rule", source_path: "rule/42/0", content: "..." },
-#   { source_type: "rule", source_path: "rule/42/1", content: "..." },
+#   { source_type: "rule", source_path: "rule/42/0_0", content: "..." },
+#   { source_type: "rule", source_path: "rule/42/1_0", content: "..." },
 # ]
 #
 # Ritorna [] se:
 #   - nessun commento contiene <!-- calvin:rules -->
-#   - il commento esiste ma non ha bullet checkati (- [x])
+#   - i commenti esistono ma non hanno bullet checkati (- [x])
 #
 # Parsing bullet:
 #   - Supporta bullet su riga singola:  - [x] Testo. Example: `code`
@@ -20,8 +20,8 @@ require "octokit"
 
 module Ingestion
   class RulesFetcher
-    RULES_MARKER   = "<!-- calvin:rules -->"
-    CHECKED_BULLET = /^- \[x\] /i
+    RULES_MARKER     = "<!-- calvin:rules -->"
+    CHECKED_BULLET   = /^- \[x\] /i
     UNCHECKED_BULLET = /^- \[ \] /i
 
     def self.from_pr(repo, pr_number)
@@ -29,23 +29,27 @@ module Ingestion
     end
 
     def initialize(repo, pr_number)
-      @repo       = repo
-      @pr_number  = pr_number
-      @client     = Octokit::Client.new(access_token: ENV.fetch("GITHUB_TOKEN"))
+      @repo      = repo
+      @pr_number = pr_number
+      @client    = Octokit::Client.new(access_token: ENV.fetch("GITHUB_TOKEN"))
     end
 
     def fetch
-      comment = find_rules_comment
-      unless comment
+      comments = find_rules_comments
+      if comments.empty?
         Calvin::LOG.info "RulesFetcher: no <!-- calvin:rules --> comment found on PR ##{@pr_number}"
         return []
       end
 
-      Calvin::LOG.info "RulesFetcher: found calvin:rules comment (id=#{comment.id})"
-      chunks = extract_checked_bullets(comment.body)
+      Calvin::LOG.info "RulesFetcher: #{comments.size} calvin:rules comment(s) found on PR ##{@pr_number}"
+
+      chunks = comments.flat_map.with_index do |comment, ci|
+        Calvin::LOG.info "RulesFetcher: processing comment id=#{comment.id} (#{ci + 1}/#{comments.size})"
+        extract_checked_bullets(comment.body, comment_index: ci)
+      end
 
       if chunks.empty?
-        Calvin::LOG.info "RulesFetcher: comment found but no checked bullets (- [x]) — nothing to ingest"
+        Calvin::LOG.info "RulesFetcher: comments found but no checked bullets (- [x]) — nothing to ingest"
         return []
       end
 
@@ -55,27 +59,24 @@ module Ingestion
 
     private
 
-    def find_rules_comment
-      page = 1
+    def find_rules_comments
+      found = []
+      page  = 1
       loop do
         comments = @client.issue_comments(@repo, @pr_number, per_page: 50, page: page)
         break if comments.empty?
 
-        found = comments.find { |c| c.body.include?(RULES_MARKER) }
-        return found if found
+        found.concat(comments.select { |c| c.body.include?(RULES_MARKER) })
 
         break if comments.size < 50
         page += 1
       end
-      nil
+      found
     rescue Octokit::NotFound
-      nil
+      []
     end
 
-    def extract_checked_bullets(body)
-      # Split il body in blocchi per bullet.
-      # Ogni bullet inizia con "- [x] " o "- [ ] ".
-      # Le righe successive indentate (codice, continuazione) appartengono al bullet precedente.
+    def extract_checked_bullets(body, comment_index: 0)
       bullets = []
       current = nil
 
@@ -88,7 +89,6 @@ module Ingestion
           bullets << current if current
           current = { checked: false, lines: [] }
         elsif current
-          # riga di continuazione (blocco codice, testo wrappato)
           current[:lines] << stripped unless stripped.empty? && current[:lines].empty?
         end
       end
@@ -101,7 +101,7 @@ module Ingestion
           content = bullet[:lines].join("\n").strip
           {
             source_type: "rule",
-            source_path: "rule/#{@pr_number}/#{i}",
+            source_path: "rule/#{@pr_number}/#{comment_index}_#{i}",
             content:     content
           }
         end
