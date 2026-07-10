@@ -44,7 +44,8 @@ module Ingestion
       }.to_json
 
       resp = http.request(req)
-      raise "Supabase upsert error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
+      body = resp.body.to_s.force_encoding("UTF-8")
+      raise "Supabase upsert error: #{resp.code} #{body}" unless resp.is_a?(Net::HTTPSuccess)
 
       true
     end
@@ -66,9 +67,10 @@ module Ingestion
       }.to_json
 
       resp = http.request(req)
-      raise "Supabase similarity error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
+      body = resp.body.to_s.force_encoding("UTF-8")
+      raise "Supabase similarity error: #{resp.code} #{body}" unless resp.is_a?(Net::HTTPSuccess)
 
-      results = JSON.parse(resp.body)
+      results = JSON.parse(body)
       results.select { |r| r["similarity"].to_f >= threshold }
     end
 
