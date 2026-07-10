@@ -93,9 +93,8 @@ module Calvin
         issue:       issue,
         github:      github,
         files:       files,
-        pr_body:     pr_body,
         usage:       usage,
-        temperature: temperature
+        description: pr_body
       )
       Success(FlowResult.new(
         files:       result[:files],
