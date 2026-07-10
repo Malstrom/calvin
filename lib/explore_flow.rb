@@ -72,13 +72,14 @@ module Calvin
     end
 
     def parse_files(issue:, stack:, github:, content:, usage:, temperature:, explore_turns:)
-      parsed = FileParser.parse(content)
-      Calvin::LOG.info "ExploreFlow: parsed #{parsed[:files].size} file(s)"
+      files   = FileParser.parse(content)
+      pr_body = FileParser.parse_pr_body(content)
+      Calvin::LOG.info "ExploreFlow: parsed #{files.size} file(s)"
       Success(
         issue:         issue,
         github:        github,
-        files:         parsed[:files],
-        pr_body:       parsed[:pr_body],
+        files:         files,
+        pr_body:       pr_body,
         usage:         usage,
         temperature:   temperature,
         explore_turns: explore_turns
