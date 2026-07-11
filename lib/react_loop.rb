@@ -5,15 +5,16 @@
 #
 #   FASE 1 — EXPLORE (multi-turn)
 #     Il modello esplora il repo tramite tool calls JSON.
-#     system: config/prompts/{stack}/explore_system.md + rules iniettate in cima
+#     system: config/prompts/{stack}/explore_system.md + rules iniettate prima di # Examples
 #     Termina quando il modello chiama done() o si raggiunge MAX_TURNS.
 #     temperature: sampling.temperature.explore (default 0.1)
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
 #     system: config/prompts/{stack}/implement_system.md (invariato)
-#     user:   ## Task + ## Rules (RAG) + observations categorizzate
-#     Rules RAG iniettate subito dopo ## Task nel messaggio utente (non nel sistema)
-#     per sfruttare il recency bias di Codestral durante la generazione.
+#     user:   ## Task + observations categorizzate + ## Rules (RAG) ULTIME
+#     Rules RAG iniettate come ULTIMA sezione del messaggio utente per
+#     sfruttare il recency bias di Codestral: le sezioni che arrivano per
+#     ultime pesano di più durante la generazione.
 #     temperature: sampling.temperature.implement (default 0.0)
 #
 # Tool disponibili durante l'esplorazione:
@@ -92,16 +93,23 @@ module Calvin
     # Prompt assembly
     # ---------------------------------------------------------------------------
 
-    # Phase 1: rules injected after # Role (recency bias: rules guide exploration)
+    # Phase 1: rules injected just before # Examples (bottom of prompt) so that
+    # recency bias keeps them salient during the exploration loop.
     def build_explore_system
       base = load_prompt("explore_system.md")
       return base unless @retrieval.rules
 
-      rules_section = "# Active rules\n\n#{@retrieval.rules}\n"
-      base.sub(/(# Role[^\n]*\n)/, "\\1\n#{rules_section}\n")
+      rules_section = "# Active rules — consult these while deciding which files to read\n\n#{@retrieval.rules}\n"
+
+      if base.include?("# Examples")
+        base.sub("# Examples", "#{rules_section}\n# Examples")
+      else
+        base + "\n\n#{rules_section}"
+      end
     end
 
-    # Phase 2: system prompt is clean — rules go into the user message instead
+    # Phase 2: system prompt is clean — rules go into the user message as the
+    # LAST section so recency bias makes Codestral apply them during generation.
     def build_implement_system
       load_prompt("implement_system.md")
     end
@@ -230,14 +238,6 @@ module Calvin
     def build_implement_user
       sections = ["## Task", @issue_prompt]
 
-      # Rules injected immediately after ## Task — adjacent to task for maximum
-      # recency effect during Codestral generation (not appended to system prompt)
-      if @retrieval.rules
-        sections << "## Rules — apply all of these without exception"
-        sections << @retrieval.rules
-        Calvin::LOG.info "context[rules]: #{@retrieval.rules.bytesize} bytes injected into user message"
-      end
-
       if @file_plan && @observations.any?
         modify_obs    = observations_for(@file_plan[:modify])
         reference_obs = observations_for(@file_plan[:reference])
@@ -267,6 +267,15 @@ module Calvin
       elsif @observations.any?
         lines = @observations.map { |o| "#{o[:label]}:\n#{o[:content].force_encoding('UTF-8')}" }.join("\n\n---\n\n")
         sections << "## Context gathered during exploration\n\n#{lines}"
+      end
+
+      # Rules injected LAST — recency bias: Codestral weights the final section
+      # most heavily during generation. Placing rules after all explored files
+      # ensures they are applied rather than buried.
+      if @retrieval.rules
+        sections << "## Rules — apply all of these without exception"
+        sections << @retrieval.rules
+        Calvin::LOG.info "context[rules]: #{@retrieval.rules.bytesize} bytes injected LAST into user message"
       end
 
       sections.compact.reject(&:empty?).join("\n\n")
