@@ -11,14 +11,14 @@
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
 #     system: config/prompts/{stack}/implement_system.md + rules iniettate in fondo
-#     user:   prompt issue + observations collassate dall'esplorazione
+#     user:   prompt issue + observations categorizzate dall'esplorazione
 #     Il modello scrive i FILE: blocks e il PR_BODY.
 #     temperature: sampling.temperature.implement (default 0.0)
 #
 # Tool disponibili durante l'esplorazione:
 #   read_file(path)  -> contenuto file o errore
 #   list_dir(path)   -> lista nomi nella directory
-#   done()           -> termina l'esplorazione e avvia implement_phase
+#   done(modify:, create:, reference:) -> termina l'esplorazione e avvia implement_phase
 #
 # Formato risposta modello durante esplorazione (sempre JSON su una riga):
 #   {"thought": "...", "tool": "...", "args": {...}}
@@ -46,6 +46,7 @@ module Calvin
       @retrieval    = retrieval || RetrievalResult.new(rules: nil, context: nil)
       @mistral      = MistralClient.new
       @observations     = []
+      @file_plan        = nil
       @json_failures    = 0
       @not_found_streak = 0
 
@@ -61,11 +62,15 @@ module Calvin
       MAX_TURNS.times do |i|
         n      = i + 1
         result = process_turn(n)
-        return implement_phase(n) if result == :done
-        break                     if result == :abort
+        if result == :done
+          verify_observations
+          return implement_phase(n)
+        end
+        break if result == :abort
       end
 
       Calvin::LOG.warn "ReAct MAX_TURNS (#{MAX_TURNS}) reached — forcing implement"
+      verify_observations
       implement_phase(MAX_TURNS)
     end
 
@@ -86,18 +91,14 @@ module Calvin
     # Prompt assembly
     # ---------------------------------------------------------------------------
 
-    # Fase 1: rules subito dopo # Role, prima del processo (recency bias: le regole
-    # guidano *cosa leggere* durante l'esplorazione)
     def build_explore_system
       base = load_prompt("explore_system.md")
       return base unless @retrieval.rules
 
       rules_section = "# Active rules\n\n#{@retrieval.rules}\n"
-      # Inserisce dopo la prima riga che inizia con "# Role"
       base.sub(/(# Role[^\n]*\n)/, "\\1\n#{rules_section}\n")
     end
 
-    # Fase 2: rules in fondo al prompt (recency bias Mistral: ultimo letto = vincoli)
     def build_implement_system
       base = load_prompt("implement_system.md")
       return base unless @retrieval.rules
@@ -130,7 +131,12 @@ module Calvin
       args = action["args"] || {}
 
       if tool == "done"
-        Calvin::LOG.info "ReAct explore done after #{n} turn(s)"
+        @file_plan = {
+          modify:    Array(args["modify"]).map(&:strip),
+          create:    Array(args["create"]).map(&:strip),
+          reference: Array(args["reference"]).map(&:strip)
+        }
+        Calvin::LOG.info "done() plan — modify=#{@file_plan[:modify]} create=#{@file_plan[:create]} reference=#{@file_plan[:reference]}"
         return :done
       end
 
@@ -178,6 +184,26 @@ module Calvin
     end
 
     # ---------------------------------------------------------------------------
+    # verify_observations — forza lettura dei file :modify non ancora in observations
+    # ---------------------------------------------------------------------------
+
+    def verify_observations
+      return unless @file_plan
+
+      @file_plan[:modify].each do |path|
+        next if @observations.any? { |o| o[:label] == path }
+
+        Calvin::LOG.warn "verify_observations: '#{path}' in modify plan but not read — forcing read"
+        content = @github.get_file_content(path)
+        unless content
+          Calvin::LOG.warn "verify_observations: '#{path}' not found in repo — skipping"
+          next
+        end
+        record_observation("read_file", { "path" => path }, content.force_encoding("UTF-8"))
+      end
+    end
+
+    # ---------------------------------------------------------------------------
     # Fase 2 — implement
     # ---------------------------------------------------------------------------
 
@@ -202,12 +228,45 @@ module Calvin
     end
 
     def build_implement_user
-      context_block = if @observations.any?
+      sections = ["## Task", @issue_prompt]
+
+      if @file_plan && @observations.any?
+        modify_obs    = observations_for(@file_plan[:modify])
+        reference_obs = observations_for(@file_plan[:reference])
+        other_obs     = @observations.reject do |o|
+          (@file_plan[:modify] + @file_plan[:create] + @file_plan[:reference]).include?(o[:label])
+        end
+
+        if modify_obs.any?
+          sections << "## Files to MODIFY — make surgical changes only, preserve everything not explicitly mentioned"
+          modify_obs.each { |o| sections << "### #{o[:label]}\n#{o[:content].force_encoding('UTF-8')}" }
+        end
+
+        if @file_plan[:create].any?
+          sections << "## Files to CREATE — generate from scratch"
+          @file_plan[:create].each { |path| sections << "### #{path}\n(file does not exist yet)" }
+        end
+
+        if reference_obs.any?
+          sections << "## Reference patterns — follow these conventions, do NOT output FILE blocks for these paths"
+          reference_obs.each { |o| sections << "### #{o[:label]}\n#{o[:content].force_encoding('UTF-8')}" }
+        end
+
+        if other_obs.any?
+          sections << "## Additional context"
+          other_obs.each { |o| sections << "#{o[:label]}:\n#{o[:content].force_encoding('UTF-8')}" }
+        end
+      elsif @observations.any?
+        # fallback: no file_plan (done called without args) — dump flat as before
         lines = @observations.map { |o| "#{o[:label]}:\n#{o[:content].force_encoding('UTF-8')}" }.join("\n\n---\n\n")
-        "## Context gathered during exploration\n\n#{lines}"
+        sections << "## Context gathered during exploration\n\n#{lines}"
       end
 
-      ["## Task", @issue_prompt, context_block].compact.reject(&:empty?).join("\n\n")
+      sections.compact.reject(&:empty?).join("\n\n")
+    end
+
+    def observations_for(paths)
+      paths.filter_map { |path| @observations.find { |o| o[:label] == path } }
     end
 
     def record_observation(tool, args, observation)

@@ -18,7 +18,7 @@ Collect enough context to:
 
 - `read_file` → {"path": "app/services/foo.rb"}
 - `list_dir`  → {"path": "app/models"}
-- `done`      → {}
+- `done`      → see Step 5 for required structure
 
 All paths are relative to the application root. Do not include the `backend/api/` prefix.
 
@@ -84,12 +84,31 @@ Do NOT call `done` unless all of the following are true:
 - [ ] Every fixture file referenced in planned tests read
 - [ ] The model file for every model your code directly touches read or its serializer read
 - [ ] Total `read_file` + `list_dir` calls so far >= 4
+- [ ] Every file listed under `modify` has been read via `read_file`
 
 If any checkbox is missing, continue reading before calling `done`.
 
 ## Step 5 — call done
 
-Call `done` only when you have enough context to implement the task and write all tests without guessing. No questions. No explanations.
+Call `done` only when you have enough context to implement the task and write all tests without guessing.
+
+`done` requires a structured argument declaring your file plan:
+
+```
+{"thought": "...", "tool": "done", "args": {
+  "modify":    ["path/to/existing_file.rb"],
+  "create":    ["path/to/new_file.rb"],
+  "reference": ["path/to/pattern_file.rb"]
+}}
+```
+
+- **modify**: files that already exist and will receive surgical changes — you MUST have read every file in this list
+- **create**: files that do not exist yet and will be generated from scratch
+- **reference**: files read only as pattern examples — do NOT output FILE blocks for these
+
+Every file you intend to output a FILE block for must appear in either `modify` or `create`. Never output a FILE block for a file listed only in `reference`.
+
+No questions. No explanations.
 
 # Examples
 
@@ -100,4 +119,4 @@ Call `done` only when you have enough context to implement the task and write al
 {"thought": "read reference service before writing mine", "tool": "read_file", "args": {"path": "app/services/update_profile_service.rb"}}
 {"thought": "plan to create a serializer — check if one already exists for this model", "tool": "list_dir", "args": {"path": "app/serializers"}}
 {"thought": "HealthSummarySerializer exists — read it to get exact attribute names", "tool": "read_file", "args": {"path": "app/serializers/health_summary_serializer.rb"}}
-{"thought": "I have read routes, a reference controller, service, serializer, fixture files, and test helper — minimum checklist satisfied, total reads >= 4", "tool": "done", "args": {}}
+{"thought": "I have read routes, a reference controller, service, serializer, fixture files, and test helper — all modify files read — minimum checklist satisfied", "tool": "done", "args": {"modify": ["app/jobs/spark_scoring_job.rb"], "create": ["app/services/magic_link_service.rb", "app/mailers/guest_mailer.rb"], "reference": ["app/controllers/api/v1/auth/sessions_controller.rb"]}}
