@@ -10,9 +10,10 @@
 #     temperature: sampling.temperature.explore (default 0.1)
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
-#     system: config/prompts/{stack}/implement_system.md + rules iniettate in fondo
-#     user:   prompt issue + observations categorizzate dall'esplorazione
-#     Il modello scrive i FILE: blocks e il PR_BODY.
+#     system: config/prompts/{stack}/implement_system.md (invariato)
+#     user:   ## Task + ## Rules (RAG) + observations categorizzate
+#     Rules RAG iniettate subito dopo ## Task nel messaggio utente (non nel sistema)
+#     per sfruttare il recency bias di Codestral durante la generazione.
 #     temperature: sampling.temperature.implement (default 0.0)
 #
 # Tool disponibili durante l'esplorazione:
@@ -91,6 +92,7 @@ module Calvin
     # Prompt assembly
     # ---------------------------------------------------------------------------
 
+    # Phase 1: rules injected after # Role (recency bias: rules guide exploration)
     def build_explore_system
       base = load_prompt("explore_system.md")
       return base unless @retrieval.rules
@@ -99,11 +101,9 @@ module Calvin
       base.sub(/(# Role[^\n]*\n)/, "\\1\n#{rules_section}\n")
     end
 
+    # Phase 2: system prompt is clean — rules go into the user message instead
     def build_implement_system
-      base = load_prompt("implement_system.md")
-      return base unless @retrieval.rules
-
-      base.rstrip + "\n\n# Active rules\n\n#{@retrieval.rules}\n"
+      load_prompt("implement_system.md")
     end
 
     def load_prompt(filename)
@@ -230,6 +230,14 @@ module Calvin
     def build_implement_user
       sections = ["## Task", @issue_prompt]
 
+      # Rules injected immediately after ## Task — adjacent to task for maximum
+      # recency effect during Codestral generation (not appended to system prompt)
+      if @retrieval.rules
+        sections << "## Rules — apply all of these without exception"
+        sections << @retrieval.rules
+        Calvin::LOG.info "context[rules]: #{@retrieval.rules.bytesize} bytes injected into user message"
+      end
+
       if @file_plan && @observations.any?
         modify_obs    = observations_for(@file_plan[:modify])
         reference_obs = observations_for(@file_plan[:reference])
@@ -257,7 +265,6 @@ module Calvin
           other_obs.each { |o| sections << "#{o[:label]}:\n#{o[:content].force_encoding('UTF-8')}" }
         end
       elsif @observations.any?
-        # fallback: no file_plan (done called without args) — dump flat as before
         lines = @observations.map { |o| "#{o[:label]}:\n#{o[:content].force_encoding('UTF-8')}" }.join("\n\n---\n\n")
         sections << "## Context gathered during exploration\n\n#{lines}"
       end
