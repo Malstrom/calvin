@@ -7,6 +7,8 @@
 #      (NON include What/Decisions/Alternatives/Risks — sezioni rimosse dal prompt
 #       perché sprecano completion token senza valore per il reviewer)
 #   2. Token usage breakdown per fase (explore + implement + totale)
+#      La colonna 'cached' mostra i token serviti dalla cache Mistral (fatturati al 10%).
+#      Appare solo per la fase explore (multi-turn). Implement non usa caching.
 #   3. Due blocchi <details> collassabili con i chunk RAG:
 #      - 🔍 RAG explore — regole usate durante la fase di esplorazione (query da issue)
 #      - 🔍 RAG implement — regole usate durante la fase di codegen (query dai path file)
@@ -60,10 +62,12 @@ module Calvin
       parts.join("\n\n")
     end
 
-    # ── private ────────────────────────────────────────────────────────────────
+    # ── private ──────────────────────────────────────────────────────────────────────────
 
     # Token breakdown a 3 righe: explore | implement | totale.
-    # Se usage_explore è nil (es. chiamate legacy), ritorna la tabella singola.
+    # La colonna 'cached' mostra i token serviti dal prefix cache Mistral.
+    # Appare solo quando usage_explore è presente (fase explore multi-turn).
+    # Se usage_explore è nil (chiamate legacy), ritorna la tabella singola senza cached.
     def self.token_table(usage, usage_explore: nil, turns: nil)
       pt = usage["prompt_tokens"]     || 0
       ct = usage["completion_tokens"] || 0
@@ -74,20 +78,22 @@ module Calvin
       ep  = usage_explore["prompt_tokens"]     || 0
       ec  = usage_explore["completion_tokens"] || 0
       et  = usage_explore["total_tokens"]      || 0
+      cached = usage_explore["cached_tokens"].to_i
 
       tp_total = ep + pt
       tc_total = ec + ct
       tt_total = et + tt
 
-      turns_label = turns ? " (#{turns}t)" : ""
+      turns_label  = turns ? " (#{turns}t)" : ""
+      cached_label = cached > 0 ? cached.to_s : "—"
 
       <<~TABLE.strip
         ### 📊 Token usage
-        | fase | prompt | completion | total |
-        |------|--------|------------|-------|
-        | explore#{turns_label} | #{ep} | #{ec} | #{et} |
-        | implement | #{pt} | #{ct} | #{tt} |
-        | **totale** | **#{tp_total}** | **#{tc_total}** | **#{tt_total}** |
+        | fase | prompt | cached | completion | total |
+        |------|--------|--------|------------|-------|
+        | explore#{turns_label} | #{ep} | #{cached_label} | #{ec} | #{et} |
+        | implement | #{pt} | — | #{ct} | #{tt} |
+        | **totale** | **#{tp_total}** | **#{cached_label}** | **#{tc_total}** | **#{tt_total}** |
       TABLE
     end
     private_class_method :token_table

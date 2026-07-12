@@ -74,8 +74,14 @@ module Calvin
       @json_failures    = 0
       @not_found_streak = 0
 
-      # Accumula usage di tutti i turn explore per il breakdown nel PR body
-      @usage_explore = { "prompt_tokens" => 0, "completion_tokens" => 0, "total_tokens" => 0 }
+      # Accumula usage di tutti i turn explore per il breakdown nel PR body.
+      # cached_tokens: somma dei token serviti dalla cache Mistral (fatturati al 10%).
+      @usage_explore = {
+        "prompt_tokens"     => 0,
+        "completion_tokens" => 0,
+        "total_tokens"      => 0,
+        "cached_tokens"     => 0
+      }
 
       sampling        = Calvin::CONFIG.dig(:sampling, :temperature) || {}
       @temp_explore   = sampling[:explore]   || sampling["explore"]   || 0.1
@@ -202,11 +208,13 @@ module Calvin
       resp = @mistral.complete_messages(@messages, temperature: @temp_explore,
                                                    cache_key: @explore_cache_key)
 
-      # Accumula usage explore per il breakdown nel PR body
+      # Accumula usage explore per il breakdown nel PR body.
+      # cached_tokens viene da usage.prompt_tokens_details.cached_tokens (Mistral API).
       if resp[:usage]
         @usage_explore["prompt_tokens"]     += resp[:usage]["prompt_tokens"].to_i
         @usage_explore["completion_tokens"] += resp[:usage]["completion_tokens"].to_i
         @usage_explore["total_tokens"]      += resp[:usage]["total_tokens"].to_i
+        @usage_explore["cached_tokens"]     += resp[:usage].dig("prompt_tokens_details", "cached_tokens").to_i
       end
 
       raw = resp[:content]
@@ -264,7 +272,7 @@ module Calvin
 
     def implement_phase(turns)
       Calvin::LOG.info "implement_phase after #{turns} explore turn(s) (temp=#{@temp_implement})"
-      Calvin::LOG.info "usage_explore: prompt=#{@usage_explore['prompt_tokens']} completion=#{@usage_explore['completion_tokens']} total=#{@usage_explore['total_tokens']} across #{turns} turn(s)"
+      Calvin::LOG.info "usage_explore: prompt=#{@usage_explore['prompt_tokens']} cached=#{@usage_explore['cached_tokens']} completion=#{@usage_explore['completion_tokens']} total=#{@usage_explore['total_tokens']} across #{turns} turn(s)"
 
       implement_system = build_implement_system
       Calvin::LOG.info "context[implement_system]: #{implement_system[0..19].inspect}"

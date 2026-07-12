@@ -12,6 +12,7 @@
 #     ref:           issue.number,
 #     model:         "codestral-latest",
 #     usage:         result[:usage],
+#     usage_explore: result[:usage_explore],
 #     status:        :success,
 #     explore_turns: result[:explore_turns],
 #     temperature:   result[:temperature],
@@ -30,7 +31,7 @@ module Calvin
 
     CSV_HEADER = %w[
       run_at workflow ref model
-      prompt_tokens completion_tokens total_tokens
+      prompt_tokens cached_tokens_explore completion_tokens total_tokens
       cost_usd status explore_turns test_pass_pct
       temperature files_written issue_length
     ].freeze
@@ -50,17 +51,19 @@ module Calvin
       model:,
       usage:,
       status:,
-      explore_turns: nil,
-      test_pass_pct: nil,
-      temperature:   nil,
-      files_written: nil,
-      issue_length:  nil
+      usage_explore:  nil,
+      explore_turns:  nil,
+      test_pass_pct:  nil,
+      temperature:    nil,
+      files_written:  nil,
+      issue_length:   nil
     )
       pricing    = Calvin::CONFIG.dig(:pricing, :models) || {}
-      prompt_tok = usage&.fetch("prompt_tokens",     0).to_i
-      compl_tok  = usage&.fetch("completion_tokens", 0).to_i
-      total_tok  = usage&.fetch("total_tokens",      0).to_i
-      cost_usd   = calculate_cost(prompt_tok, compl_tok, model, pricing)
+      prompt_tok  = usage&.fetch("prompt_tokens",     0).to_i
+      compl_tok   = usage&.fetch("completion_tokens", 0).to_i
+      total_tok   = usage&.fetch("total_tokens",      0).to_i
+      cached_tok  = usage_explore&.fetch("cached_tokens", 0).to_i || 0
+      cost_usd    = calculate_cost(prompt_tok, compl_tok, model, pricing)
 
       new_row = [
         Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -68,6 +71,7 @@ module Calvin
         ref.to_s,
         model,
         prompt_tok.to_s,
+        cached_tok > 0 ? cached_tok.to_s : nil,
         compl_tok.to_s,
         total_tok.to_s,
         cost_usd.to_s,
