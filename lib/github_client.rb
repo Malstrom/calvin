@@ -72,6 +72,34 @@ module Calvin
       []
     end
 
+    # Cerca un pattern testuale in un file o in tutti i file di una directory.
+    # Restituisce righe nel formato: "path:line_number: content".
+    # Matching case-insensitive. Se il path è una directory, scansiona solo i file immediati.
+    def grep_files(pattern, path)
+      regex = Regexp.new(Regexp.escape(pattern.to_s), Regexp::IGNORECASE)
+      target = full_path(path)
+
+      node = @client.contents(REPO, path: target)
+      entries = node.is_a?(Array) ? node.select { |e| e.type == "file" } : [node]
+
+      results = entries.flat_map do |entry|
+        content = get_file_content(strip_repo_root(entry.path))
+        next [] unless content
+
+        content.each_line.with_index(1).filter_map do |line, idx|
+          next unless line.match?(regex)
+
+          "#{strip_repo_root(entry.path)}:#{idx}: #{line.chomp}"
+        end
+      end
+
+      results.empty? ? "ERROR: no matches for '#{pattern}' in #{path}" : results.join("\n")
+    rescue Octokit::NotFound
+      "ERROR: file or directory not found: #{path}"
+    rescue RegexpError => e
+      "ERROR: invalid pattern '#{pattern}': #{e.message}"
+    end
+
     # Scrive tutti i file in un unico commit atomico sul branch.
     def commit_files_atomically(files, message:, branch:)
       branch_data   = @client.branch(REPO, branch)
