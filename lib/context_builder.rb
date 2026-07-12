@@ -2,7 +2,7 @@
 # Costruisce il prompt utente per il ReActLoop.
 #
 # Fonti:
-#   1. title + body dell'issue
+#   1. title + body dell'issue, con header espliciti # Task / ## Description
 #   2. NEXT_MIGRATION_VERSION (letto dal repo target)
 #
 # Nota: il retrieval RAG è responsabilità di ExploreFlow (step retrieve_context),
@@ -23,7 +23,9 @@ module Calvin
       Calvin::LOG.info "  body  : #{body.empty? ? '(vuoto)' : body[0..120].gsub("\n", " ")}"
       Calvin::LOG.info "  bytes : #{(title + body).bytesize}"
 
-      content = [title, body].reject(&:empty?).join("\n\n")
+      parts = ["# Task: #{title}"]
+      parts << "## Description\n\n#{body}" unless body.empty?
+      content = parts.join("\n\n")
 
       if github_client
         next_version = next_migration_version(github_client)
