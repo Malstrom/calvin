@@ -14,9 +14,11 @@
 # temperature e max_tokens vengono letti da Calvin::CONFIG[:sampling].
 # Passare temperature: esplicitamente sovrascrive il default.
 #
-# response_format: json_object passato solo durante explore (cache_key presente) per
+# response_format: json_object passato SOLO durante explore (cache_key presente) per
 # forzare Codestral a rispondere sempre in plain JSON text e non switchare in tool_calls
 # mode nativo quando il system prompt contiene chiavi "tool" negli esempi.
+# Durante implement (cache_key assente) nessun response_format — il modello risponde
+# con FILE: blocks in testo libero.
 
 require "net/http"
 require "json"
@@ -42,7 +44,7 @@ module Calvin
 
     # Multi-turno — array di messages, usato dal ReAct loop (explore phase)
     # messages:  [{ role: "user"|"assistant"|"tool", content: String }, ...]
-    # cache_key: String opzionale — attiva prompt caching sul prefisso condiviso
+    # cache_key: String opzionale — attiva prompt caching e json_object mode (explore only)
     def complete_messages(messages, temperature: default_temperature(:implement), cache_key: nil)
       call(messages, model: DEFAULT_MODEL, temperature: temperature, cache_key: cache_key)
     end
@@ -66,13 +68,13 @@ module Calvin
       req["Authorization"] = "Bearer #{@api_key}"
 
       body = {
-        model:           model,
-        messages:        messages,
-        temperature:     temperature,
-        max_tokens:      @max_tokens,
-        response_format: { type: "json_object" }
+        model:       model,
+        messages:    messages,
+        temperature: temperature,
+        max_tokens:  @max_tokens
       }
       body[:prompt_cache_key] = cache_key if cache_key
+      body[:response_format]  = { type: "json_object" } if cache_key
 
       req.body = body.to_json
 
