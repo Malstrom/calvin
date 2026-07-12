@@ -20,6 +20,9 @@
 #     issue:         issue,
 #     github:        github_client,
 #     usage:         hash | nil,
+#     usage_explore: hash | nil,
+#     turns:         integer | nil,
+#     retrieval:     RetrievalResult | nil,
 #     description:   string | nil
 #   ) → Success({ pr_url:, branch:, files: }) | Failure({ step:, error: })
 
@@ -31,7 +34,7 @@ module Calvin
     include Dry::Monads[:result]
     extend self
 
-    def call(files:, issue:, github:, usage: nil, description: nil)
+    def call(files:, issue:, github:, usage: nil, usage_explore: nil, turns: nil, retrieval: nil, description: nil)
       run_id    = ENV.fetch("GITHUB_RUN_ID", Time.now.to_i.to_s)
       branch    = build_branch(issue, run_id)
       timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
@@ -53,7 +56,14 @@ module Calvin
 
       pr = github.create_pull_request(
         title: pr_title,
-        body:  PrBodyBuilder.build(issue: issue, usage: usage, description: description),
+        body:  PrBodyBuilder.build(
+          issue:         issue,
+          usage:         usage,
+          usage_explore: usage_explore,
+          turns:         turns,
+          description:   description,
+          retrieval:     retrieval
+        ),
         head:  branch
       )
 

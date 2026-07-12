@@ -59,42 +59,49 @@ module Calvin
       result = loop.run
       Calvin::LOG.info "ExploreFlow: react_loop done — turns=#{result[:turns]}"
       Success(
-        issue:         issue,
-        stack:         stack,
-        github:        github,
-        content:       result[:content],
-        usage:         result[:usage],
-        temperature:   result[:temperature],
-        explore_turns: result[:turns]
+        issue:          issue,
+        stack:          stack,
+        github:         github,
+        content:        result[:content],
+        usage:          result[:usage],
+        usage_explore:  result[:usage_explore],
+        temperature:    result[:temperature],
+        explore_turns:  result[:turns],
+        retrieval:      retrieval
       )
     rescue => e
       Failure(step: :react_loop, error: e.message, usage: nil, explore_turns: 0)
     end
 
-    def parse_files(issue:, stack:, github:, content:, usage:, temperature:, explore_turns:)
+    def parse_files(issue:, stack:, github:, content:, usage:, usage_explore:, temperature:, explore_turns:, retrieval:)
       files   = FileParser.parse(content)
       pr_body = FileParser.parse_pr_body(content)
       Calvin::LOG.info "ExploreFlow: parsed #{files.size} file(s)"
       Success(
-        issue:         issue,
-        github:        github,
-        files:         files,
-        pr_body:       pr_body,
-        usage:         usage,
-        temperature:   temperature,
-        explore_turns: explore_turns
+        issue:          issue,
+        github:         github,
+        files:          files,
+        pr_body:        pr_body,
+        usage:          usage,
+        usage_explore:  usage_explore,
+        temperature:    temperature,
+        explore_turns:  explore_turns,
+        retrieval:      retrieval
       )
     rescue => e
       Failure(step: :parse_files, error: e.message, usage: usage, explore_turns: explore_turns)
     end
 
-    def commit_and_pr(issue:, github:, files:, pr_body:, usage:, temperature:, explore_turns:)
+    def commit_and_pr(issue:, github:, files:, pr_body:, usage:, usage_explore:, temperature:, explore_turns:, retrieval:)
       outcome = CommitAndPr.call(
-        issue:       issue,
-        github:      github,
-        files:       files,
-        usage:       usage,
-        description: pr_body
+        issue:         issue,
+        github:        github,
+        files:         files,
+        usage:         usage,
+        usage_explore: usage_explore,
+        turns:         explore_turns,
+        retrieval:     retrieval,
+        description:   pr_body
       )
       return Failure(step: :commit_and_pr, error: outcome.failure[:error], usage: usage, explore_turns: explore_turns) if outcome.failure?
 
