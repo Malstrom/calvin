@@ -43,16 +43,7 @@ Then the PR description:
 PR_BODY_START
 ## What this does
 
-## Rules applied
-
-Select the **most relevant rules** from the active ruleset that you explicitly applied — **maximum 15**. Prioritise rules that prevented a concrete bug in this task. Do not list rules that were never at risk of being violated.
-Format: `- <rule summary> — applied in \`path/to/file.rb\``
-
-## Rule candidates
-
-Patterns you observed in the codebase during exploration that are not yet in the ruleset but recur consistently and would prevent bugs if formalised.
-Format: `- [ ] <candidate rule, written as an actionable constraint>`
-Leave empty if nothing stands out.
+Describe clearly what the implementation does and why. Focus on behaviour, not on listing files changed.
 PR_BODY_END
 ```
 
