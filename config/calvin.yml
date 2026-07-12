@@ -70,4 +70,4 @@ rag:
 
   similarity_threshold:
     explore:    0.70   # fase explore — query lunga, soglia alta per tenere solo regole rilevanti
-    implement:  0.62   # fase implement — query da path più corta, soglia più bassa per non perdere segnale
+    implement:  0.52   # fase implement — query da path più corta, soglia più bassa per non perdere segnale
