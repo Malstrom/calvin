@@ -184,10 +184,11 @@ module Calvin
 
     def embed(query)
       api_key = ENV.fetch("MISTRAL_API_KEY")
-      payload = { model: embed_model, inputs: [query] }.to_json
+      # NOTA: l'API Mistral /v1/embeddings usa il campo `input` (non `inputs`)
+      payload = { model: embed_model, input: [query] }.to_json
 
       http = Net::HTTP.new(EMBED_URL.host, EMBED_URL.port)
-      http.use_ssl     = true
+      http.use_ssl      = true
       http.open_timeout = OPEN_TIMEOUT
       http.read_timeout = READ_TIMEOUT
 
@@ -215,7 +216,7 @@ module Calvin
       http.read_timeout = READ_TIMEOUT
 
       req = Net::HTTP::Post.new(url)
-      req["apikey"]       = api_key
+      req["apikey"]        = api_key
       req["Authorization"] = "Bearer #{api_key}"
       req["Content-Type"]  = "application/json"
       req.body = payload
