@@ -28,7 +28,8 @@
 # Stack determinato dalla label dell'issue ("rails" | "flutter").
 # Default: "rails".
 #
-# .run -> { content: String, turns: Integer, usage: Hash | nil, temperature: Float }
+# .run -> { content: String, turns: Integer, usage: Hash | nil,
+#           usage_explore: Hash, temperature: Float }
 
 require "json"
 require_relative "file_parser"
@@ -52,6 +53,9 @@ module Calvin
       @json_failures    = 0
       @not_found_streak = 0
 
+      # Accumula usage di tutti i turn explore per il breakdown nel PR body
+      @usage_explore = { "prompt_tokens" => 0, "completion_tokens" => 0, "total_tokens" => 0 }
+
       sampling        = Calvin::CONFIG.dig(:sampling, :temperature) || {}
       @temp_explore   = sampling[:explore]   || sampling["explore"]   || 0.1
       @temp_implement = sampling[:implement] || sampling["implement"] || 0.0
@@ -59,7 +63,8 @@ module Calvin
       setup_messages
     end
 
-    # Ritorna { content: String, turns: Integer, usage: Hash | nil, temperature: Float }
+    # Ritorna { content: String, turns: Integer, usage: Hash | nil,
+    #           usage_explore: Hash, temperature: Float }
     def run
       MAX_TURNS.times do |i|
         n      = i + 1
@@ -162,7 +167,16 @@ module Calvin
     end
 
     def call_model
-      raw = @mistral.complete_messages(@messages, temperature: @temp_explore)[:content]
+      resp = @mistral.complete_messages(@messages, temperature: @temp_explore)
+
+      # Accumula usage explore per il breakdown nel PR body
+      if resp[:usage]
+        @usage_explore["prompt_tokens"]     += resp[:usage]["prompt_tokens"].to_i
+        @usage_explore["completion_tokens"] += resp[:usage]["completion_tokens"].to_i
+        @usage_explore["total_tokens"]      += resp[:usage]["total_tokens"].to_i
+      end
+
+      raw = resp[:content]
       Calvin::LOG.info "ReAct turn (temp=#{@temp_explore}): #{raw[0..120]}"
       raw
     end
@@ -217,6 +231,7 @@ module Calvin
 
     def implement_phase(turns)
       Calvin::LOG.info "implement_phase after #{turns} explore turn(s) (temp=#{@temp_implement})"
+      Calvin::LOG.info "usage_explore: prompt=#{@usage_explore['prompt_tokens']} completion=#{@usage_explore['completion_tokens']} total=#{@usage_explore['total_tokens']} across #{turns} turn(s)"
 
       implement_system = build_implement_system
       Calvin::LOG.info "context[implement_system]: #{implement_system[0..19].inspect}"
@@ -232,7 +247,13 @@ module Calvin
         temperature: @temp_implement
       )
 
-      { content: response[:content], turns: turns, usage: response[:usage], temperature: @temp_implement }
+      {
+        content:       response[:content],
+        turns:         turns,
+        usage:         response[:usage],
+        usage_explore: @usage_explore,
+        temperature:   @temp_implement
+      }
     end
 
     def build_implement_user
