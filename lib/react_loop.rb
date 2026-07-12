@@ -48,10 +48,17 @@ module Calvin
 
     PROMPTS_DIR = File.expand_path("../../config/prompts", __FILE__)
 
-    def initialize(github, issue_prompt, stack: "rails", retrieval: nil)
+    def initialize(github, issue_prompt, stack: "rails", retrieval: nil, issue_number: nil)
       @github       = github
       @issue_prompt = issue_prompt
       @stack        = stack
+
+      # Cache key stabile per tutta la fase explore di questo run.
+      # Attiva il prefix caching Mistral sul prefisso condiviso (system + issue + rules).
+      # Formato: "calvin-{issue_number}-{run_id}" — univoco per run, stabile tra i turni.
+      run_id       = Process.pid
+      issue_ref    = issue_number || "unknown"
+      @explore_cache_key = "calvin-#{issue_ref}-#{run_id}"
 
       # retrieval_explore: regole orientamento, query da title+body (top_k_explore)
       # Passato dall'esterno da ExploreFlow prima che il loop parta.
@@ -81,6 +88,8 @@ module Calvin
     #           usage_explore: Hash, temperature: Float,
     #           retrieval_explore: RetrievalResult, retrieval_implement: RetrievalResult }
     def run
+      Calvin::LOG.info "ReActLoop: explore cache_key=#{@explore_cache_key}"
+
       MAX_TURNS.times do |i|
         n      = i + 1
         result = process_turn(n)
@@ -189,7 +198,9 @@ module Calvin
     end
 
     def call_model
-      resp = @mistral.complete_messages(@messages, temperature: @temp_explore)
+      # cache_key passato solo durante explore (multi-turn) — attiva prefix caching Mistral.
+      resp = @mistral.complete_messages(@messages, temperature: @temp_explore,
+                                                   cache_key: @explore_cache_key)
 
       # Accumula usage explore per il breakdown nel PR body
       if resp[:usage]
@@ -261,6 +272,7 @@ module Calvin
       implement_user = build_implement_user
       Calvin::LOG.info "context[implement_user]:   #{implement_user[0..19].inspect}"
 
+      # Implement è una singola chiamata — nessun cache_key (prefix caching non ha beneficio).
       response = @mistral.complete_messages(
         [
           { role: "system", content: implement_system },

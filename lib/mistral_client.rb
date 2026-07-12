@@ -1,10 +1,15 @@
 # frozen_string_literal: true
 # Client per Mistral / Codestral API.
 #
-# .complete(prompt, temperature:)            → { content: String, usage: Hash }  — singola chiamata
-# .complete_messages(messages, temperature:) → { content: String, usage: Hash }  — multi-turno (ReAct)
+# .complete(prompt, temperature:)                        → { content: String, usage: Hash }
+# .complete_messages(messages, temperature:, cache_key:) → { content: String, usage: Hash }
 #
 # usage: { "prompt_tokens" => Int, "completion_tokens" => Int, "total_tokens" => Int }
+#
+# cache_key: stringa opzionale. Se presente, viene passata come prompt_cache_key
+# all'API Mistral per attivare il prefix caching sul prefisso condiviso tra i turni.
+# I token cachati vengono addebitati al 10% del prezzo normale.
+# Usare solo durante la fase explore (multi-turn) — non serve per implement.
 #
 # temperature e max_tokens vengono letti da Calvin::CONFIG[:sampling].
 # Passare temperature: esplicitamente sovrascrive il default.
@@ -32,9 +37,10 @@ module Calvin
     end
 
     # Multi-turno — array di messages, usato dal ReAct loop (explore phase)
-    # messages: [{ role: "user"|"assistant"|"tool", content: String }, ...]
-    def complete_messages(messages, temperature: default_temperature(:implement))
-      call(messages, model: DEFAULT_MODEL, temperature: temperature)
+    # messages:  [{ role: "user"|"assistant"|"tool", content: String }, ...]
+    # cache_key: String opzionale — attiva prompt caching sul prefisso condiviso
+    def complete_messages(messages, temperature: default_temperature(:implement), cache_key: nil)
+      call(messages, model: DEFAULT_MODEL, temperature: temperature, cache_key: cache_key)
     end
 
     private
@@ -45,7 +51,7 @@ module Calvin
         0.0
     end
 
-    def call(messages, model:, temperature:)
+    def call(messages, model:, temperature:, cache_key: nil)
       http              = Net::HTTP.new(API_URL.host, API_URL.port)
       http.use_ssl      = true
       http.open_timeout = OPEN_TIMEOUT
@@ -54,20 +60,31 @@ module Calvin
       req                  = Net::HTTP::Post.new(API_URL)
       req["Content-Type"]  = "application/json"
       req["Authorization"] = "Bearer #{@api_key}"
-      req.body             = {
+
+      body = {
         model:       model,
         messages:    messages,
         temperature: temperature,
         max_tokens:  @max_tokens
-      }.to_json
+      }
+      body[:prompt_cache_key] = cache_key if cache_key
+
+      req.body = body.to_json
 
       resp = http.request(req)
       raise "Mistral error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
       body = JSON.parse(resp.body)
+      usage = body["usage"]
+
+      if cache_key && usage
+        cached = usage.dig("prompt_tokens_details", "cached_tokens").to_i
+        Calvin::LOG.info "MistralClient: cached_tokens=#{cached} / #{usage['prompt_tokens']} prompt" if cached > 0
+      end
+
       {
         content:     body.dig("choices", 0, "message", "content"),
-        usage:       body["usage"],
+        usage:       usage,
         temperature: temperature
       }
     end
