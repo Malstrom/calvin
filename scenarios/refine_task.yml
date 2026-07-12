@@ -1,83 +1,97 @@
 id: refine_task
 role: |
-  Task refinement scenario. Takes an existing task or bug issue and brings
-  it to the level of detail required for Calvin to write a precise agent
-  prompt. Reads .calvin/* from the TARGET repo and targeted parts of the
-  repo codebase, then updates the issue body using templates/issue_task.md.
+  Task refinement scenario. Takes a raw issue (goal + intent) and brings it
+  to the level of detail required for Calvin to run the develop cycle.
+
+  The issue describes WHAT we want — concrete goal, expected behavior,
+  endpoint contract, acceptance criteria.
+  The HOW (which files to touch, which patterns to follow, how to structure
+  the code) is NOT part of this issue — Calvin derives it from RAG chunks
+  and codebase exploration during the develop cycle.
+
+  Templates available (choose based on issue type):
+    - templates/issue_endpoint.md  — new or modified HTTP endpoint
+    - templates/issue_logic.md     — behavior change without new endpoint
+    - templates/issue_job.md       — new or modified delayed job
+    - templates/issue_bug.md       — bug fix
 
 steps:
+  - name: identify_type
+    description: |
+      Read the issue title, body, and labels. Determine which of the 4 types
+      applies: endpoint, logic, job, bug.
+      If ambiguous, ask Igor before proceeding.
+      Do not assume — wrong template = wrong issue structure.
+
   - name: read_issue_context
     description: |
-      Read the task or bug issue body, labels (epic, task, bug, backend, ios)
-      and any linked docs.
+      Read the current issue body and any linked issues or epics referenced
+      in the title or body. Understand what Igor wants to achieve.
 
   - name: read_calvin_context
     description: |
-      Read ALL .calvin/* files from the TARGET repo (e.g. synca/backend/api/.calvin/):
+      Read ALL .calvin/* files from the TARGET repo
+      (e.g. synca/backend/api/.calvin/):
         - .calvin/stack.yml
         - .calvin/conventions.yml
         - .calvin/testing.yml
         - .calvin/decisions.yml
         - .calvin/schema.yml
-      These files are small and act as the authoritative spec — never skim
-      or partially read them. Always read them fully before refining the task.
+      These files are the authoritative spec for the project.
+      Read them fully — they inform what fields are relevant and what
+      constraints apply (e.g. auth patterns, error format, job conventions).
+      Do NOT use them to fill "Entry points" or "Touched files" — those
+      fields do not exist in the new templates.
 
-  - name: explore_repo_targeted
+  - name: fill_template
     description: |
-      Explore the codebase to understand the real implementation state of
-      the task or bug. Start from the paths indicated by the issue body and
-      .calvin/*, then follow every reference that is relevant: models,
-      controllers, services, contracts, serializers, jobs, tests, migrations,
-      concerns, fixtures. Do NOT restrict exploration to a fixed list of file
-      types. Do NOT stop at the first level — if a controller uses a concern,
-      read the concern; if a serializer is referenced, read it.
-      The goal is to know enough to identify ALL files that will be touched,
-      not to scan the entire repo blindly.
+      Fill the appropriate template for the issue type identified in step 1.
 
-  - name: collect_file_contents
-    description: |
-      For every file identified as touched in explore_repo_targeted:
-        - MODIFIED files: download the full current content. These will appear
-          verbatim in the issue under ## Touched files and later in the agent
-          prompt under ## Files (REWRITE blocks).
-        - NEW test files: write the boilerplate (frozen_string_literal, require,
-          class declaration) plus one named empty test per expected behaviour.
-          Method names must be self-explanatory in plain English — the name
-          alone must communicate what is being asserted without reading the body.
-        - EXISTING test files to extend: download the full current content.
-      Do not skip any file that will be modified. The agent must never guess
-      the current content of a file it is about to change.
-
-  - name: update_issue_task
-    description: |
-      Update the issue body using templates/issue_task.md (in the Calvin repo),
-      filling all relevant fields:
-        - Goal, Parent, Stack
-        - DB Changes (if any)
-        - Endpoint (method, path, auth, request/response shape)
-        - Entry points (file paths, class names, route names)
-        - Acceptance criteria
-        - Dependencies (other issues or PRs)
-        - Notes (edge cases, gotchas)
-        - Examples (references to existing code to replicate)
-        - Touched files: list every file that will be created or modified,
-          labelled as NEW or MODIFIED. This becomes the contract for the
-          agent_prompt scenario.
+      Rules:
+        - Every field must be filled. No placeholders, no [TODO], no empty sections.
+        - ## Goal: one sentence, concrete and verifiable from the outside.
+        - ## Endpoint (endpoint type only): include full request/response shapes
+          as JSON. If auth is required, say so explicitly.
+        - ## Behavior (logic type only): Before/After must describe observable
+          behavior, not implementation. "Before: returns 200 with empty array.
+          After: returns 422 with error code X" is good.
+          "Before: does not call ServiceX" is bad — not observable from outside.
+        - ## Job (job type only): idempotency and failure behavior are mandatory.
+          If unclear, ask Igor.
+        - ## Reproduction (bug type only): steps must be specific enough that
+          Calvin can write a failing test that reproduces the bug.
+        - ## Acceptance criteria: observable outcomes only. Not "uses monad",
+          not "follows convention X" — those come from RAG chunks automatically.
+          Each criterion must be independently verifiable as pass/fail.
+        - ## DB Changes (endpoint type only): include only if a migration or
+          model change is needed. If none, write "none".
+        - ## Notes: include only business constraints, edge cases, or domain
+          knowledge that Calvin cannot infer from code or chunks. If nothing
+          relevant, omit the section entirely.
+        - Do NOT add: Entry points, Touched files, Examples, Dependencies.
+          Calvin derives all of that during the develop cycle.
 
   - name: confirm_with_igor
     description: |
-      Show the updated issue to Igor in chat and refine until all of the
-      following are true before proceeding:
-        - [ ] Every file that will be touched is listed under Touched files
-        - [ ] Every new test file has at least one named empty test with a
-              self-explanatory method name
-        - [ ] Acceptance criteria are verifiable (pass/fail, not vague)
-        - [ ] DB Changes section is present if and only if a migration is needed
-        - [ ] No field is left as a placeholder or [TODO]
+      Show the filled issue to Igor in chat before updating the issue body.
+      Refine until all of the following are true:
+        - [ ] Template type matches the actual intent of the issue
+        - [ ] ## Goal is one sentence, verifiable from the outside
+        - [ ] All mandatory fields for the template type are filled
+        - [ ] ## Acceptance criteria are pass/fail, not implementation details
+        - [ ] No field contains a placeholder or [TODO]
+        - [ ] ## Notes is present only if it contains real constraints
+
+  - name: update_issue
+    description: |
+      Update the issue body with the confirmed template content.
+      Do NOT change: issue number, title, labels.
+      Do NOT add the `calvin` or `agent` label — Igor does that manually
+      after reviewing the final issue body.
 
 constraints:
-  - Do not change the issue number or labels without confirmation.
-  - Do not add the `agent` label in this scenario.
-  - Template to use: templates/issue_task.md (in the Calvin repo).
-  - Context source: .calvin/* files in the TARGET repo (read fully), plus
-    targeted exploration of app/ code as needed.
+  - Choose the template based on issue type — never mix sections from multiple templates.
+  - The issue body describes WHAT, never HOW.
+  - All fields mandatory for the chosen template type — no exceptions.
+  - Templates location: templates/ in the Calvin repo.
+  - Context source: .calvin/* in the TARGET repo (read fully).

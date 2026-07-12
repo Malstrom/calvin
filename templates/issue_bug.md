@@ -1,22 +1,10 @@
-## Bug description
+## Goal
 
-[What the system does wrong — concrete, observable, no speculation]
+[one sentence — what bug is fixed, concrete and verifiable]
 
-## Expected behavior
+## Parent
 
-[What it should do instead]
-
-## How to reproduce
-
-<!--
-  Minimal steps or failing test name.
-  Examples:
-    - Run `bin/rails test test/fixtures/users.yml` → Alice behaves as guest instead of active
-    - POST /api/v1/auth/guest with valid email → returns 201 instead of 422
--->
-
-- [step 1]
-- [step 2]
+#[epic issue number or "none" if standalone]
 
 ## Stack
 
@@ -24,24 +12,18 @@
 - [ ] ios
 - [ ] frontend
 
-## Root cause
+## Reproduction
 
-<!-- Filled by refine_task — leave as placeholder at creation -->
-
-[TBD]
-
-## Files to touch
-
-<!-- Filled by refine_task — leave as placeholder at creation -->
-
-- `path/to/file` — [role]
+- Steps: [numbered list of steps to reproduce]
+- Current behavior: [what happens]
+- Expected behavior: [what should happen]
+- Environment: [prod | staging | local]
 
 ## Acceptance criteria
 
-<!-- Filled by refine_task — leave as placeholder at creation -->
-
-- [ ] [TBD]
+- [ ] [verifiable criterion — the bug no longer reproduces]
+- [ ] [no regression on related behavior]
 
 ## Notes
 
-<!-- Edge cases, do-not-touch rules, related decisions — optional -->
+[edge cases, business constraints, things Calvin cannot infer from code]
