@@ -117,7 +117,10 @@ module Calvin
         source     = chunk["source_path"] || chunk[:source_path] || "unknown"
         similarity = chunk["similarity"]  || chunk[:similarity]
         sim_fmt    = similarity ? format("%.2f", similarity.to_f) : "n/a"
-        content    = (chunk["content"] || chunk[:content]).to_s.strip
+        content    = (chunk["content"] || chunk[:content]).to_s
+                       .strip
+                       .gsub(/\r?\n/, " ")
+                       .gsub("|", "\\|")
         short      = content.length > 120 ? "#{content[0..117]}..." : content
         "| #{i} | #{short} | `#{source}` | #{sim_fmt} |"
       end.join("\n")
