@@ -1,0 +1,68 @@
+name: Calvin ingest engine
+
+# Triggers when a PR in any repo that uses Calvin receives the label 'ingest'.
+# The label must be added manually (or by another workflow) on a PR in the
+# TARGET repo (e.g. Malstrom/synca). Calvin is called via workflow_dispatch
+# from the target repo's own trigger workflow.
+#
+# This workflow is called via workflow_call from the target repo.
+# Inputs:
+#   pr_number     — PR number in the target repo
+#   target_repo   — full repo name (e.g. Malstrom/synca)
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: number
+      target_repo:
+        required: true
+        type: string
+    secrets:
+      SYNCA_TOKEN:
+        required: true
+      MISTRAL_API_KEY:
+        required: true
+      SUPABASE_URL:
+        required: true
+      SUPABASE_SERVICE_KEY:
+        required: true
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout calvin
+        uses: actions/checkout@v4
+        with:
+          repository: Malstrom/calvin
+          token: ${{ secrets.SYNCA_TOKEN }}
+          path: calvin
+
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repo }}
+          token: ${{ secrets.SYNCA_TOKEN }}
+          path: target
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install Ruby dependencies
+        run: bundle install
+        working-directory: calvin/bin
+
+      - name: Run Calvin ingest
+        run: bundle exec ruby $GITHUB_WORKSPACE/calvin/bin/ingest.rb
+        working-directory: target
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/calvin/bin/Gemfile
+          PR_NUMBER: ${{ inputs.pr_number }}
+          GITHUB_REPOSITORY: ${{ inputs.target_repo }}
+          GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
