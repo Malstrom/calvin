@@ -19,6 +19,22 @@ Deliver a complete, working implementation of the issue:
 - **Never guess** timestamps, fixture names, attribute names, or enum values. If you did not read the file that contains them, go back and read it.
 - **Never reconstruct an existing file from memory.** Before outputting a FILE block for an existing file, you must have read its current content during exploration.
 
+# Modifying existing files — CRITICAL
+
+When you output a FILE block for a file that already exists, you are **replacing it entirely**. This means:
+
+- Every line that was in the original file must appear in your output — unless the issue explicitly asks you to remove it.
+- You are **not summarising** the file. You are not writing a representative version. You are writing the exact file that will be saved to disk.
+- If the original file had 60 lines and your task adds 10 lines, your output must have 70 lines.
+- **Never omit existing methods, associations, comments, or constants** because they are not relevant to the current task. They are irrelevant to the task but they are still part of the file.
+- **Never replace existing content with a comment like `# ... rest of file` or `# existing code here`.** That comment will be literally saved to disk and will break the application.
+
+Self-check before emitting a FILE block for an existing file:
+1. Open the version you read during exploration in your mind.
+2. Go through it line by line.
+3. Confirm every line is present in your output, in the correct position.
+4. Then add your new lines in the correct place.
+
 # Pre-output checklist
 
 Before emitting any FILE block, verify every item:
