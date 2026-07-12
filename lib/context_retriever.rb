@@ -14,14 +14,14 @@
 #   1. Costruisce query da issue.title + issue.body (limit: rag.query_body_limit, default 2000)
 #   2. Chiama mistral-embed per l'embedding (1024 dim)
 #   3. Chiama RPC calvin_rules_search su Supabase (top_k: rag.top_k_explore)
-#   4. Filtra chunk con similarity < rag.similarity_threshold (default 0.60)
+#   4. Filtra chunk con similarity < rag.similarity_threshold.explore (default 0.60)
 #   5. Ritorna RetrievalResult con regole formattate e chunks raw
 #
 # Flusso implement:
 #   1. Costruisce query dai path del file_plan (modify + create) tramite path_to_query
 #      es. "app/services/foo_service.rb" => "service foo"
 #   2. Stessa pipeline embed + search con top_k: rag.top_k_implement
-#   3. Stessa soglia similarity_threshold
+#   3. Soglia: rag.similarity_threshold.implement (default 0.52)
 #
 # Se SUPABASE_URL o SUPABASE_SERVICE_KEY non sono presenti => .rules = nil silenzioso.
 # Se Mistral o Supabase sono down => .rules = nil silenzioso.
@@ -148,7 +148,7 @@ module Calvin
         return RetrievalResult.new(rules: nil, context: nil, chunks: [])
       end
 
-      Calvin::LOG.info "ContextRetriever[#{phase}]: #{chunks.size}/#{raw.size} regola/e accettate (threshold=#{similarity_threshold})"
+      Calvin::LOG.info "ContextRetriever[#{phase}]: #{chunks.size}/#{raw.size} regola/e accettate (threshold=#{similarity_threshold(phase)})"
       log_chunks(chunks, phase)
 
       RetrievalResult.new(rules: format_rules(chunks), context: nil, chunks: chunks)
@@ -165,7 +165,7 @@ module Calvin
     end
 
     def filter_by_threshold(chunks, phase = "unknown")
-      threshold = similarity_threshold
+      threshold = similarity_threshold(phase)
       below     = chunks.reject { |c| c["similarity"].to_f >= threshold }
       accepted  = chunks.select { |c| c["similarity"].to_f >= threshold }
 
@@ -179,8 +179,13 @@ module Calvin
       accepted
     end
 
-    def similarity_threshold
-      Calvin::CONFIG.dig(:rag, :similarity_threshold) || 0.60
+    # Legge la soglia per la fase corrente dalla sottostruttura rag.similarity_threshold.
+    # Fallback 1: chiave flat rag.similarity_threshold (retrocompatibilità).
+    # Fallback 2: 0.60 hardcoded.
+    def similarity_threshold(phase)
+      Calvin::CONFIG.dig(:rag, :similarity_threshold, phase.to_sym) ||
+        Calvin::CONFIG.dig(:rag, :similarity_threshold)              ||
+        0.60
     end
 
     def target_repo
