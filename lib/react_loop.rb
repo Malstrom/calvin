@@ -8,6 +8,8 @@
 #     system: config/prompts/{stack}/explore_system.md + rules iniettate prima di # Examples
 #     Termina quando il modello chiama done() o si raggiunge MAX_TURNS.
 #     temperature: sampling.temperature.explore (default 0.1)
+#     RAG: Calvin::ContextRetriever.call_for_explore(issue) — query da title+body
+#          top_k: rag.top_k_explore (default 10)
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
 #     system: config/prompts/{stack}/implement_system.md (invariato)
@@ -16,6 +18,9 @@
 #     sfruttare il recency bias di Codestral: le sezioni che arrivano per
 #     ultime pesano di più durante la generazione.
 #     temperature: sampling.temperature.implement (default 0.0)
+#     RAG: Calvin::ContextRetriever.call_for_implement(file_plan) — query dai path file
+#          top_k: rag.top_k_implement (default 20)
+#          Chiamato subito dopo done() — quando il file_plan è noto.
 #
 # Tool disponibili durante l'esplorazione:
 #   read_file(path)  -> contenuto file o errore
@@ -46,7 +51,15 @@ module Calvin
       @github       = github
       @issue_prompt = issue_prompt
       @stack        = stack
-      @retrieval    = retrieval || RetrievalResult.new(rules: nil, context: nil)
+
+      # retrieval_explore: regole orientamento, query da title+body (top_k_explore)
+      # Passato dall'esterno da ExploreFlow prima che il loop parta.
+      @retrieval_explore = retrieval || RetrievalResult.new(rules: nil, context: nil)
+
+      # retrieval_implement: regole codegen, query dai path file_plan (top_k_implement)
+      # Popolato internamente subito dopo done() — quando il file_plan è noto.
+      @retrieval_implement = RetrievalResult.new(rules: nil, context: nil)
+
       @mistral      = MistralClient.new
       @observations     = []
       @file_plan        = nil
@@ -102,9 +115,9 @@ module Calvin
     # recency bias keeps them salient during the exploration loop.
     def build_explore_system
       base = load_prompt("explore_system.md")
-      return base unless @retrieval.rules
+      return base unless @retrieval_explore.rules
 
-      rules_section = "# Active rules — consult these while deciding which files to read\n\n#{@retrieval.rules}\n"
+      rules_section = "# Active rules — consult these while deciding which files to read\n\n#{@retrieval_explore.rules}\n"
 
       if base.include?("# Examples")
         base.sub("# Examples", "#{rules_section}\n# Examples")
@@ -150,6 +163,13 @@ module Calvin
           reference: Array(args["reference"]).map(&:strip)
         }
         Calvin::LOG.info "done() plan — modify=#{@file_plan[:modify]} create=#{@file_plan[:create]} reference=#{@file_plan[:reference]}"
+
+        # Secondo retrieval RAG: query costruita dai path del file_plan.
+        # Fatto qui — dopo done(), prima di implement_phase — così la query
+        # riflette esattamente i file che verranno generati o modificati.
+        @retrieval_implement = Calvin::ContextRetriever.call_for_implement(@file_plan)
+        Calvin::LOG.info "retrieval_implement: #{@retrieval_implement.rules&.bytesize || 0} bytes"
+
         return :done
       end
 
@@ -290,13 +310,15 @@ module Calvin
         sections << "## Context gathered during exploration\n\n#{lines}"
       end
 
-      # Rules injected LAST — recency bias: Codestral weights the final section
-      # most heavily during generation. Placing rules after all explored files
-      # ensures they are applied rather than buried.
-      if @retrieval.rules
+      # Rules iniettate ULTIME — recency bias: Codestral pesa di più le sezioni finali.
+      # Usa retrieval_implement (query dai path) se disponibile, altrimenti fallback
+      # su retrieval_explore (query dall'issue) per garantire sempre una copertura.
+      active_rules = @retrieval_implement.rules || @retrieval_explore.rules
+      if active_rules
+        source = @retrieval_implement.rules ? "implement" : "explore (fallback)"
         sections << "## Rules — apply all of these without exception"
-        sections << @retrieval.rules
-        Calvin::LOG.info "context[rules]: #{@retrieval.rules.bytesize} bytes injected LAST into user message"
+        sections << active_rules
+        Calvin::LOG.info "context[rules/#{source}]: #{active_rules.bytesize} bytes injected LAST into user message"
       end
 
       sections.compact.reject(&:empty?).join("\n\n")
