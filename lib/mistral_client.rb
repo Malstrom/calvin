@@ -13,6 +13,10 @@
 #
 # temperature e max_tokens vengono letti da Calvin::CONFIG[:sampling].
 # Passare temperature: esplicitamente sovrascrive il default.
+#
+# response_format: json_object passato solo durante explore (cache_key presente) per
+# forzare Codestral a rispondere sempre in plain JSON text e non switchare in tool_calls
+# mode nativo quando il system prompt contiene chiavi "tool" negli esempi.
 
 require "net/http"
 require "json"
@@ -62,10 +66,11 @@ module Calvin
       req["Authorization"] = "Bearer #{@api_key}"
 
       body = {
-        model:       model,
-        messages:    messages,
-        temperature: temperature,
-        max_tokens:  @max_tokens
+        model:           model,
+        messages:        messages,
+        temperature:     temperature,
+        max_tokens:      @max_tokens,
+        response_format: { type: "json_object" }
       }
       body[:prompt_cache_key] = cache_key if cache_key
 
@@ -74,7 +79,7 @@ module Calvin
       resp = http.request(req)
       raise "Mistral error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
-      body = JSON.parse(resp.body)
+      body          = JSON.parse(resp.body)
       usage         = body["usage"]
       finish_reason = body.dig("choices", 0, "finish_reason")
 
@@ -83,7 +88,7 @@ module Calvin
         Calvin::LOG.info "MistralClient: cached_tokens=#{cached} / #{usage['prompt_tokens']} prompt" if cached > 0
       end
 
-      Calvin::LOG.warn "MistralClient: finish_reason=#{finish_reason} (possible truncation)" if finish_reason != "stop"
+      Calvin::LOG.warn "MistralClient: finish_reason=#{finish_reason}" if finish_reason != "stop"
 
       {
         content:       body.dig("choices", 0, "message", "content"),
