@@ -4,14 +4,11 @@
 #
 # Struttura body:
 #   1. Description prodotta da Codestral
-#      (NON include What/Decisions/Alternatives/Risks — sezioni rimosse dal prompt
-#       perché sprecano completion token senza valore per il reviewer)
 #   2. Token usage breakdown per fase (explore + implement + totale)
-#      La colonna 'cached' mostra i token serviti dalla cache Mistral (fatturati al 10%).
-#      Appare solo per la fase explore (multi-turn). Implement non usa caching.
-#   3. Due blocchi <details> collassabili con i chunk RAG:
-#      - 🔍 RAG explore — regole usate durante la fase di esplorazione (query da issue)
-#      - 🔍 RAG implement — regole usate durante la fase di codegen (query dai path file)
+#      Colonne: inviati | cached (×0.1) con % | generati | costo $
+#      Il costo è calcolato con il cache discount al 10% (fonte: docs.mistral.ai/studio-api/conversations/advanced/prompt-caching)
+#      Formula: (inviati - cached) × input_price + cached × input_price × 0.1 + generati × output_price
+#   3. Due blocchi <details> collassabili con i chunk RAG
 #   4. Footer: "Implemented by Calvin via Codestral <version>" + "Closes #N"
 #
 # Uso:
@@ -22,15 +19,15 @@
 
 module Calvin
   module PrBodyBuilder
+    CACHE_DISCOUNT = 0.1 # Mistral: cached token fatturati al 10% del prezzo input
+
     def self.build(issue:, usage:, description: nil, usage_explore: nil, turns: nil,
                    retrieval_explore: nil, retrieval_implement: nil,
-                   # retrocompatibilità: vecchio parametro :retrieval usato come explore
                    retrieval: nil)
       model_version = Calvin::MODEL.to_s
 
-      # Retrocompatibilità: se arriva il vecchio :retrieval senza i nuovi, usalo come explore
-      r_explore    = retrieval_explore || retrieval
-      r_implement  = retrieval_implement
+      r_explore   = retrieval_explore || retrieval
+      r_implement = retrieval_implement
 
       description_section = description.to_s.strip.empty? \
         ? "_No description provided._"
@@ -49,7 +46,6 @@ module Calvin
       parts.join("\n\n")
     end
 
-    # Body del commento di review postato da PrReviewFlow
     def self.review_comment(usage:, review_text: nil)
       model_version = Calvin::MODEL.to_s
 
@@ -64,52 +60,61 @@ module Calvin
 
     # ── private ──────────────────────────────────────────────────────────────────────────
 
-    # Token breakdown a 3 righe: explore | implement | totale.
-    # La colonna 'cached' mostra i token serviti dal prefix cache Mistral.
-    # Appare solo quando usage_explore è presente (fase explore multi-turn).
-    # Se usage_explore è nil (chiamate legacy), ritorna la tabella singola senza cached.
     def self.token_table(usage, usage_explore: nil, turns: nil)
+      model   = Calvin::MODEL.to_s
+      pricing = Calvin::CONFIG.dig(:pricing, :models) || {}
+      p       = pricing[model.to_sym] || pricing[model] || {}
+      inp     = p[:input_per_million].to_f  / 1_000_000.0
+      out     = p[:output_per_million].to_f / 1_000_000.0
+
       pt = usage["prompt_tokens"]     || 0
       ct = usage["completion_tokens"] || 0
-      tt = usage["total_tokens"]      || 0
 
-      return single_row_table(pt, ct, tt) unless usage_explore
+      return single_row_table(pt, ct, inp, out) unless usage_explore
 
-      ep  = usage_explore["prompt_tokens"]     || 0
-      ec  = usage_explore["completion_tokens"] || 0
-      et  = usage_explore["total_tokens"]      || 0
+      ep     = usage_explore["prompt_tokens"]     || 0
+      ec     = usage_explore["completion_tokens"] || 0
       cached = usage_explore["cached_tokens"].to_i
 
+      # costi
+      cost_explore   = ((ep - cached) * inp) + (cached * inp * CACHE_DISCOUNT) + (ec * out)
+      cost_implement = (pt * inp) + (ct * out)
+      cost_total     = cost_explore + cost_implement
+
+      # token totali
       tp_total = ep + pt
       tc_total = ec + ct
-      tt_total = et + tt
+      ct_total = cached  # cached solo in explore
 
+      # etichette
       turns_label  = turns ? " (#{turns}t)" : ""
-      cached_label = cached > 0 ? cached.to_s : "—"
+      pct_explore  = ep > 0 ? " (#{(cached * 100.0 / ep).round}%%)" : ""
+      pct_total    = tp_total > 0 ? " (#{(ct_total * 100.0 / tp_total).round}%%)" : ""
+      cached_exp   = cached > 0 ? "#{cached}#{pct_explore}" : "—"
+      cached_tot   = ct_total > 0 ? "#{ct_total}#{pct_total}" : "—"
 
       <<~TABLE.strip
         ### 📊 Token usage
-        | fase | prompt | cached | completion | total |
-        |------|--------|--------|------------|-------|
-        | explore#{turns_label} | #{ep} | #{cached_label} | #{ec} | #{et} |
-        | implement | #{pt} | — | #{ct} | #{tt} |
-        | **totale** | **#{tp_total}** | **#{cached_label}** | **#{tc_total}** | **#{tt_total}** |
+        | fase | inviati | cached (×0.1) | generati | costo |
+        |------|---------|----------------|----------|-------|
+        | explore#{turns_label} | #{ep} | #{cached_exp} | #{ec} | $#{format('%.4f', cost_explore)} |
+        | implement | #{pt} | — | #{ct} | $#{format('%.4f', cost_implement)} |
+        | **totale** | **#{tp_total}** | **#{cached_tot}** | **#{tc_total}** | **$#{format('%.4f', cost_total)}** |
       TABLE
     end
     private_class_method :token_table
 
-    def self.single_row_table(pt, ct, tt)
+    def self.single_row_table(pt, ct, inp, out)
+      cost = (pt * inp) + (ct * out)
       <<~TABLE.strip
         ### 📊 Token usage
-        | prompt | completion | total |
-        |--------|------------|-------|
-        | #{pt} | #{ct} | #{tt} |
+        | inviati | generati | costo |
+        |---------|----------|-------|
+        | #{pt} | #{ct} | $#{format('%.4f', cost)} |
       TABLE
     end
     private_class_method :single_row_table
 
-    # Blocco <details> collassabile per una fase RAG.
-    # Ritorna nil se retrieval è nil o non ha chunks — non emette il blocco.
     def self.rag_details(retrieval, phase:, label:)
       return nil unless retrieval
 
