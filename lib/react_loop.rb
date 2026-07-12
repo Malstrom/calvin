@@ -23,8 +23,9 @@
 #          Chiamato subito dopo done() — quando il file_plan è noto.
 #
 # Tool disponibili durante l'esplorazione:
-#   read_file(path)  -> contenuto file o errore
-#   list_dir(path)   -> lista nomi nella directory
+#   read_file(path)              -> contenuto file o errore
+#   list_dir(path)               -> lista nomi nella directory
+#   grep(pattern:, path:)        -> righe matching in file o directory (case-insensitive)
 #   done(modify:, create:, reference:) -> termina l'esplorazione e avvia implement_phase
 #
 # Formato risposta modello durante esplorazione (sempre JSON su una riga):
@@ -64,7 +65,7 @@ module Calvin
       # Passato dall'esterno da ExploreFlow prima che il loop parta.
       @retrieval_explore = retrieval || RetrievalResult.new(rules: nil, context: nil, chunks: [])
 
-      # retrieval_implement: regole codegen, query dai path file_plan (top_k_implement)
+      # retrieval_implement: regole codegen, query dai path del file_plan (top_k_implement)
       # Popolato internamente subito dopo done() — quando il file_plan è noto.
       @retrieval_implement = RetrievalResult.new(rules: nil, context: nil, chunks: [])
 
@@ -358,6 +359,7 @@ module Calvin
       label = case tool
               when "read_file" then args["path"].to_s.strip
               when "list_dir"  then "ls #{args['path'].to_s.strip}"
+              when "grep"      then "grep #{args['pattern'].to_s.strip} in #{args['path'].to_s.strip}"
               else tool
               end
 
@@ -378,6 +380,11 @@ module Calvin
         path    = args["path"].to_s.strip
         entries = github.list_directory(path)
         entries.any? ? entries.join("\n") : "ERROR: empty or not found: #{path}"
+      },
+      "grep" => ->(github, args) {
+        pattern = args["pattern"].to_s
+        path    = args["path"].to_s.strip
+        github.grep_files(pattern, path)
       }
     }.freeze
 
@@ -385,7 +392,7 @@ module Calvin
       handler = TOOLS[tool]
       unless handler
         Calvin::LOG.warn "Unknown tool: #{tool}"
-        return "ERROR: unknown tool '#{tool}'. Use: read_file, list_dir, done."
+        return "ERROR: unknown tool '#{tool}'. Use: read_file, list_dir, grep, done."
       end
       handler.call(@github, args)
     rescue => e

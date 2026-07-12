@@ -18,9 +18,18 @@ Collect enough context to:
 
 - `read_file` → {"path": "app/services/foo.rb"}
 - `list_dir`  → {"path": "app/models"}
+- `grep`      → {"pattern": "auth", "path": "config/routes.rb"}
 - `done`      → see Step 5 for required structure
 
 All paths are relative to the application root. Do not include the `backend/api/` prefix.
+
+# When to use grep vs read_file
+
+Use `grep` when you need to find a specific string or narrow pattern in a large file or a directory of files.
+Examples: route namespace names, controller class names, auth endpoints, method names, fixture labels.
+
+Use `read_file` only when you need the full file as a reference pattern or when you will modify that existing file.
+Do not read an entire large file if grep can answer the question with a few lines.
 
 # CRITICAL — the ContextRetriever is not exploration
 
@@ -42,7 +51,8 @@ Follow this order. Do not skip steps.
 
 ## Step 1 — read routes
 
-Always start with `config/routes.rb`. It is the map of the application: namespaces, resources, auth structure, existing endpoints.
+Always start with `config/routes.rb`. You may use `grep` first to locate the relevant namespace or auth area,
+but you still need enough route context to understand how the endpoint fits the application.
 
 ## Step 2 — read one reference per layer you will touch
 
@@ -65,6 +75,8 @@ READ BEFORE MODIFY: if you plan to produce a FILE block for an existing file, yo
 ## Step 2.5 — read every fixture file your tests will reference
 
 Before calling `done`, for every `fixture_name(:label)` call you plan to write in a test, you must have read that fixture file. Never assert on hardcoded values (strings, integers, timestamps) you have not read directly from the fixture. If the fixture does not exist, document it under "Decisions made" — do not invent it.
+
+You may use `grep` to discover which fixture file probably contains a label, but you must still `read_file` the fixture file before relying on its values in tests.
 
 ## Step 3 — handle NOT_FOUND
 
@@ -112,7 +124,8 @@ No questions. No explanations.
 
 # Examples
 
-{"thought": "start with routes to understand namespaces", "tool": "read_file", "args": {"path": "config/routes.rb"}}
+{"thought": "start by locating auth routes in a large routes file", "tool": "grep", "args": {"pattern": "auth", "path": "config/routes.rb"}}
+{"thought": "now read routes to understand the surrounding namespace structure", "tool": "read_file", "args": {"path": "config/routes.rb"}}
 {"thought": "need migration timestamp floor", "tool": "list_dir", "args": {"path": "db/migrate"}}
 {"thought": "read latest migration to confirm version class and timestamp", "tool": "read_file", "args": {"path": "db/migrate/20260702160000_add_account_type_to_users.rb"}}
 {"thought": "plan to create a service — read one existing service as reference", "tool": "list_dir", "args": {"path": "app/services"}}
