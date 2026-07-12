@@ -153,7 +153,8 @@ module Calvin
 
       RetrievalResult.new(rules: format_rules(chunks), context: nil, chunks: chunks)
     rescue => e
-      Calvin::LOG.warn "ContextRetriever[#{phase}]: fallback silenzioso (#{e.message})"
+      Calvin::LOG.warn "ContextRetriever[#{phase}]: fallback silenzioso — #{e.class}: #{e.message}"
+      Calvin::LOG.warn "ContextRetriever[#{phase}]: #{e.backtrace.first(3).join(' | ')}" if e.backtrace
       RetrievalResult.new(rules: nil, context: nil, chunks: [])
     end
 
@@ -198,11 +199,15 @@ module Calvin
       http.read_timeout = READ_TIMEOUT
 
       req = Net::HTTP::Post.new(EMBED_URL)
-      req["Authorization"] = "Bearer #{api_key}"
-      req["Content-Type"]  = "application/json"
+      req["Authorization"]   = "Bearer #{api_key}"
+      req["Content-Type"]    = "application/json"
+      # Forza risposta non compressa: Net::HTTP non decomprime automaticamente gzip
+      # e un body gzip causa JSON.parse failure con "unexpected character: '?'"
+      req["Accept-Encoding"] = "identity"
       req.body = payload
 
       resp = http.request(req)
+      Calvin::LOG.info "ContextRetriever[embed]: HTTP #{resp.code}, content-encoding=#{resp['content-encoding'].inspect}"
       raise "Mistral embed HTTP #{resp.code}: #{resp.body[0..200]}" unless resp.is_a?(Net::HTTPSuccess)
 
       data = JSON.parse(resp.body)
@@ -225,12 +230,16 @@ module Calvin
       http.read_timeout = READ_TIMEOUT
 
       req = Net::HTTP::Post.new(url)
-      req["apikey"]        = api_key
-      req["Authorization"] = "Bearer #{api_key}"
-      req["Content-Type"]  = "application/json"
+      req["apikey"]          = api_key
+      req["Authorization"]   = "Bearer #{api_key}"
+      req["Content-Type"]    = "application/json"
+      # Forza risposta non compressa: Net::HTTP non decomprime automaticamente gzip
+      # e un body gzip causa JSON.parse failure con "unexpected character: '?'"
+      req["Accept-Encoding"] = "identity"
       req.body = payload
 
       resp = http.request(req)
+      Calvin::LOG.info "ContextRetriever[supabase]: HTTP #{resp.code}, content-encoding=#{resp['content-encoding'].inspect}, body_size=#{resp.body.bytesize}"
       raise "Supabase RPC HTTP #{resp.code}: #{resp.body[0..200]}" unless resp.is_a?(Net::HTTPSuccess)
 
       JSON.parse(resp.body)
