@@ -9,10 +9,12 @@
 #   .context => nil (predisposto per source_type futuri)
 #
 # Flusso:
-#   1. Costruisce query testuale da issue.title + issue.body (primi 2000 char)
+#   1. Costruisce query testuale da issue.title + issue.body
+#      (lunghezza body configurabile via rag.query_body_limit, default 2000)
 #   2. Chiama mistral-embed per ottenere l'embedding della query (1024 dim)
 #   3. Chiama RPC calvin_rules_search su Supabase (top_k dal CONFIG o nessun limite)
-#   4. Ritorna RetrievalResult con regole formattate
+#   4. Filtra i chunk con similarity < rag.similarity_threshold (default 0.60)
+#   5. Ritorna RetrievalResult con regole formattate
 #
 # Se SUPABASE_URL o SUPABASE_SERVICE_KEY non sono presenti => .rules = nil silenzioso.
 # Se Mistral o Supabase sono down => .rules = nil silenzioso.
@@ -27,11 +29,6 @@ module Calvin
     EMBED_URL    = URI("https://api.mistral.ai/v1/embeddings")
     OPEN_TIMEOUT = 10
     READ_TIMEOUT = 20
-
-    # Quanti caratteri del body includere nella query di embedding.
-    # Le issue raffinate con refine_task hanno contenuto semantico rilevante
-    # (Goal, Acceptance criteria, Touched files) spesso oltre i 500 chars.
-    QUERY_BODY_LIMIT = 2000
 
     def self.call(issue)
       new.call(issue)
@@ -48,14 +45,15 @@ module Calvin
       Calvin::LOG.info "ContextRetriever: query_length = #{query.length} chars"
 
       embedding = embed(query)
-      chunks    = search_rules(embedding)
+      raw       = search_rules(embedding)
+      chunks    = filter_by_threshold(raw)
 
       if chunks.empty?
-        Calvin::LOG.info "ContextRetriever: nessuna regola trovata"
+        Calvin::LOG.info "ContextRetriever: nessuna regola trovata (#{raw.size} recuperate, tutte sotto soglia)"
         return RetrievalResult.new(rules: nil, context: nil)
       end
 
-      Calvin::LOG.info "ContextRetriever: #{chunks.size} regola/e recuperata/e"
+      Calvin::LOG.info "ContextRetriever: #{chunks.size}/#{raw.size} regola/e accettate (threshold=#{similarity_threshold})"
       log_chunks(chunks)
 
       RetrievalResult.new(rules: format_rules(chunks), context: nil)
@@ -71,8 +69,23 @@ module Calvin
     end
 
     def build_query(issue)
-      body_excerpt = issue.body.to_s[0..QUERY_BODY_LIMIT]
+      body_excerpt = issue.body.to_s[0..query_body_limit]
       "#{issue.title} #{body_excerpt}".strip
+    end
+
+    def filter_by_threshold(chunks)
+      threshold = similarity_threshold
+      below     = chunks.reject { |c| c["similarity"].to_f >= threshold }
+      accepted  = chunks.select { |c| c["similarity"].to_f >= threshold }
+
+      if below.any?
+        Calvin::LOG.info "ContextRetriever: #{below.size} chunk filtrati sotto soglia #{threshold}:"
+        below.each do |c|
+          Calvin::LOG.info "ContextRetriever:   skip #{c['source_path']} (similarity=#{format('%.4f', c['similarity'].to_f)})"
+        end
+      end
+
+      accepted
     end
 
     def embed(text)
@@ -142,6 +155,14 @@ module Calvin
         lines << "- #{content}"
       end
       lines.join("\n")
+    end
+
+    def query_body_limit
+      rag_config(:query_body_limit)&.to_i || 2000
+    end
+
+    def similarity_threshold
+      rag_config(:similarity_threshold)&.to_f || 0.60
     end
 
     def rag_config(key)
