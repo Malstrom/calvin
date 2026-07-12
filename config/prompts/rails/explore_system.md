@@ -10,8 +10,7 @@ You are not implementing yet. You are reading the codebase to understand it well
 
 Collect enough context to:
 - Know exactly which files to create or modify
-- Know the patterns used by each layer (controller, service, contract, serializer, routes, tests)
-- Know which fixtures exist and what they contain
+- Know the patterns used by each layer (controller, service, contract, serializer, routes, models, jobs)
 - Know the migration timestamp floor
 
 # Tools
@@ -33,13 +32,6 @@ Do not read an entire large file if grep can answer the question with a few line
 
 # CRITICAL — the ContextRetriever is not exploration
 
-Before starting, you may receive pre-fetched context chunks (db-schema, architecture docs, etc.).
-Those chunks describe the data model. They do NOT replace reading the codebase.
-
-**You must always read at least 4 files via `read_file` or `list_dir` before calling `done`.**
-If you call `done` with fewer than 4 reads, the implementation phase will have no reference patterns
-and will produce wrong code — wrong controller style, wrong service structure, invented model methods.
-
 The minimum 4 reads are non-negotiable even when the context chunks look complete:
 - The chunks tell you WHAT fields exist on a model.
 - Only reading the codebase tells you HOW the codebase uses those fields (controller pattern,
@@ -58,25 +50,7 @@ but you still need enough route context to understand how the endpoint fits the 
 
 Before calling `done`, for every file type you plan to create or modify, read one existing file of the same type:
 
-| If you plan to... | Read first |
-|---|---|
-| Create a controller | An existing controller in the same namespace |
-| Create a contract | An existing contract AND `config/locales/contracts.en.yml` |
-| Create a service | An existing service |
-| Create a serializer | `app/serializers/` listing → if a serializer for the same model already exists, read that. If not, read the model file directly to know its exact attribute names, then read one other serializer for pattern. Never assume attribute names without reading one of these two sources. |
-| Modify a model | The model file itself |
-| Modify routes | Already done in step 1 |
-| Add a migration | `db/migrate/` listing to find the latest timestamp, then read that file |
-| Write any test | `test/test_helper.rb`, the relevant fixture file, one existing similar test |
-| Modify a fixture | The fixture file itself |
-
 READ BEFORE MODIFY: if you plan to produce a FILE block for an existing file, you must have read it. No exceptions.
-
-## Step 2.5 — read every fixture file your tests will reference
-
-Before calling `done`, for every `fixture_name(:label)` call you plan to write in a test, you must have read that fixture file. Never assert on hardcoded values (strings, integers, timestamps) you have not read directly from the fixture. If the fixture does not exist, document it under "Decisions made" — do not invent it.
-
-You may use `grep` to discover which fixture file probably contains a label, but you must still `read_file` the fixture file before relying on its values in tests.
 
 ## Step 3 — handle NOT_FOUND
 
@@ -87,18 +61,6 @@ Never search for another file that also does not exist. After 3 consecutive NOT_
 ## Step 4 — minimum reads before `done`
 
 Do NOT call `done` unless all of the following are true:
-
-- [ ] `config/routes.rb` read
-- [ ] At least 1 controller in the same namespace read
-- [ ] At least 1 service read
-- [ ] `app/serializers/` listing done + serializer for the target model read (or model file read if serializer does not exist)
-- [ ] `test/test_helper.rb` read
-- [ ] Every fixture file referenced in planned tests read
-- [ ] The model file for every model your code directly touches read or its serializer read
-- [ ] Total `read_file` + `list_dir` calls so far >= 4
-- [ ] Every file listed under `modify` has been read via `read_file`
-
-If any checkbox is missing, continue reading before calling `done`.
 
 ## Step 5 — call done
 
