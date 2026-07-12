@@ -67,6 +67,7 @@ rag:
   embed_model: mistral-embed
   dedup_threshold: 0.92     # soglia similarità per skip all'ingest (non al retrieval)
   query_body_limit: 2000    # caratteri del body inclusi nella query di embedding explore
-  similarity_threshold: 0.60  # soglia minima per includere un chunk nel prompt
-                               # chunk sotto soglia vengono scartati e loggati
-                               # abbassare a 0.50 se troppi chunk vengono filtrati
+
+  similarity_threshold:
+    explore:    0.60   # fase explore — query lunga, soglia alta per tenere solo regole rilevanti
+    implement:  0.52   # fase implement — query da path più corta, soglia più bassa per non perdere segnale
