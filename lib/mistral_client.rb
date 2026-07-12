@@ -75,17 +75,21 @@ module Calvin
       raise "Mistral error: #{resp.code} #{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
       body = JSON.parse(resp.body)
-      usage = body["usage"]
+      usage         = body["usage"]
+      finish_reason = body.dig("choices", 0, "finish_reason")
 
       if cache_key && usage
         cached = usage.dig("prompt_tokens_details", "cached_tokens").to_i
         Calvin::LOG.info "MistralClient: cached_tokens=#{cached} / #{usage['prompt_tokens']} prompt" if cached > 0
       end
 
+      Calvin::LOG.warn "MistralClient: finish_reason=#{finish_reason} (possible truncation)" if finish_reason != "stop"
+
       {
-        content:     body.dig("choices", 0, "message", "content"),
-        usage:       usage,
-        temperature: temperature
+        content:       body.dig("choices", 0, "message", "content"),
+        usage:         usage,
+        temperature:   temperature,
+        finish_reason: finish_reason
       }
     end
   end
