@@ -57,7 +57,7 @@ rag:
   # Fase 1 — explore: regole iniettate nel system prompt per orientare l'esplorazione.
   # Tenere basso: il modello usa queste regole per decidere dove leggere, non per scrivere codice.
   # Troppe regole nel system prompt di explore aumentano il rumore e distraggono dalla direzione.
-  top_k_explore: 10
+  top_k_explore: 20
 
   # Fase 2 — implement: regole iniettate nell'user message come ultima sezione (recency bias).
   # La query è costruita dai path del file_plan → regole molto più specifiche al codice da generare.
