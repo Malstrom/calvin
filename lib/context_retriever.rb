@@ -9,7 +9,7 @@
 #   .context => nil (predisposto per source_type futuri)
 #
 # Flusso:
-#   1. Costruisce query testuale da issue.title + issue.body (primi 500 char)
+#   1. Costruisce query testuale da issue.title + issue.body (primi 2000 char)
 #   2. Chiama mistral-embed per ottenere l'embedding della query (1024 dim)
 #   3. Chiama RPC calvin_rules_search su Supabase (top_k dal CONFIG o nessun limite)
 #   4. Ritorna RetrievalResult con regole formattate
@@ -28,6 +28,11 @@ module Calvin
     OPEN_TIMEOUT = 10
     READ_TIMEOUT = 20
 
+    # Quanti caratteri del body includere nella query di embedding.
+    # Le issue raffinate con refine_task hanno contenuto semantico rilevante
+    # (Goal, Acceptance criteria, Touched files) spesso oltre i 500 chars.
+    QUERY_BODY_LIMIT = 2000
+
     def self.call(issue)
       new.call(issue)
     end
@@ -40,6 +45,7 @@ module Calvin
 
       query     = build_query(issue)
       Calvin::LOG.info "ContextRetriever: query = #{query[0..120]}..."
+      Calvin::LOG.info "ContextRetriever: query_length = #{query.length} chars"
 
       embedding = embed(query)
       chunks    = search_rules(embedding)
@@ -65,7 +71,7 @@ module Calvin
     end
 
     def build_query(issue)
-      body_excerpt = issue.body.to_s[0..500]
+      body_excerpt = issue.body.to_s[0..QUERY_BODY_LIMIT]
       "#{issue.title} #{body_excerpt}".strip
     end
 
