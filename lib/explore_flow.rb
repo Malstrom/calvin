@@ -55,7 +55,7 @@ module Calvin
     end
 
     def react_loop(issue:, stack:, github:, prompt:, retrieval:)
-      loop = ReActLoop.new(github, prompt, stack: stack, retrieval: retrieval)
+      loop = ReActLoop.new(github, prompt, stack: stack, retrieval: retrieval, issue_number: issue.number)
       result = loop.run
       Calvin::LOG.info "ExploreFlow: react_loop done — turns=#{result[:turns]}, explore_chunks=#{result[:retrieval_explore].chunks.size}, implement_chunks=#{result[:retrieval_implement].chunks.size}"
       Success(
