@@ -78,15 +78,15 @@ chunks.each do |chunk|
 
       puts "[ingest] → REPLACE (similar chunk found, similarity=#{format('%.4f', sim)})"
       puts "[ingest]   replacing: #{existing['source_path']}"
-      puts "[ingest]   old: #{existing['content'].to_s.lines.first.to_s.rstrip}"
+      puts "[ingest]   old: #{existing['content'].to_s.dup.lines.first.to_s.rstrip}"
 
       # Elimina il vecchio chunk e inserisce il nuovo
       store.delete_by_source_path(repo: repo, source_path: existing["source_path"])
 
       replacements << {
-        old_content:     existing["content"].to_s.strip,
-        old_source_path: existing["source_path"],
-        new_content:     chunk[:content].to_s.strip,
+        old_content:     existing["content"].to_s.dup.strip,
+        old_source_path: existing["source_path"].to_s.dup,
+        new_content:     chunk[:content].to_s.dup.strip,
         similarity:      sim
       }
 
