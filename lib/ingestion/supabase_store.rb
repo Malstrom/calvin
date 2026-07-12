@@ -45,7 +45,7 @@ module Ingestion
       }.to_json
 
       resp = http.request(req)
-      body = resp.body.to_s.force_encoding("UTF-8")
+      body = resp.body.to_s.dup.force_encoding("UTF-8")
       raise "Supabase upsert error: #{resp.code} #{body}" unless resp.is_a?(Net::HTTPSuccess)
 
       true
@@ -61,7 +61,7 @@ module Ingestion
       set_headers(req)
 
       resp = http.request(req)
-      body = resp.body.to_s.force_encoding("UTF-8")
+      body = resp.body.to_s.dup.force_encoding("UTF-8")
       raise "Supabase delete error: #{resp.code} #{body}" unless resp.is_a?(Net::HTTPSuccess)
 
       true
@@ -84,7 +84,7 @@ module Ingestion
       }.to_json
 
       resp = http.request(req)
-      body = resp.body.to_s.force_encoding("UTF-8")
+      body = resp.body.to_s.dup.force_encoding("UTF-8")
       raise "Supabase similarity error: #{resp.code} #{body}" unless resp.is_a?(Net::HTTPSuccess)
 
       results = JSON.parse(body)
