@@ -182,6 +182,11 @@ module Calvin
       Calvin::CONFIG.dig(:rag, :similarity_threshold) || 0.60
     end
 
+    def target_repo
+      Calvin::CONFIG.dig(:rag, :target_repo) or
+        raise "rag.target_repo non configurato in config/calvin.yml"
+    end
+
     def embed(query)
       api_key = ENV.fetch("MISTRAL_API_KEY")
       # NOTA: l'API Mistral /v1/embeddings usa il campo `input` (non `inputs`)
@@ -208,7 +213,11 @@ module Calvin
       url     = URI("#{ENV['SUPABASE_URL']}/rest/v1/rpc/calvin_rules_search")
       api_key = ENV.fetch("SUPABASE_SERVICE_KEY")
 
-      payload = { query_embedding: embedding, match_count: top_k }.to_json
+      payload = {
+        query_embedding: embedding,
+        match_count:     top_k,
+        target_repo:     target_repo
+      }.to_json
 
       http = Net::HTTP.new(url.host, url.port)
       http.use_ssl      = true
