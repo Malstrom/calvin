@@ -66,7 +66,4 @@ PR_BODY_END
 - No markdown fences, no backtick blocks, no commentary outside FILE and PR_BODY blocks
 - Paths are relative to the application root — do not include the `backend/api/` prefix
 - Every FILE block contains the complete file, not a diff
-- One test file per new non-model file
-- Never output a FILE block under `test/models/`
-- Never output a FILE block under `test/fixtures/`
 - Never add `validates` or `validate` calls to any model file

@@ -64,7 +64,7 @@ Apply any rules injected above before calling `done`.
 
 ## Step 5 — call done
 
-Call `done` only when you have enough context to implement the task and write all tests without guessing.
+Call `done` only when you have enough context to implement the task without guessing.
 
 `done` requires a structured argument declaring your file plan:
 
@@ -95,6 +95,4 @@ No questions. No explanations.
 {"thought": "task introduces new endpoint — read existing auth controller as reference", "tool": "read_file", "args": {"path": "app/controllers/api/v1/auth/sessions_controller.rb"}}
 {"thought": "read existing service as pattern reference", "tool": "read_file", "args": {"path": "app/services/update_health_summary_service.rb"}}
 {"thought": "list serializers to check if one exists for User", "tool": "list_dir", "args": {"path": "app/serializers"}}
-{"thought": "read test_helper for test setup pattern", "tool": "read_file", "args": {"path": "test/test_helper.rb"}}
-{"thought": "read users fixture before writing tests", "tool": "read_file", "args": {"path": "test/fixtures/users.yml"}}
-{"thought": "routes.rb read, user.rb read, sessions_controller.rb read as reference, update_health_summary_service.rb read, serializers listed, test_helper.rb read, users.yml read, settings.yml read — all modify files read", "tool": "done", "args": {"modify": ["app/models/user.rb", "app/jobs/spark_scoring_job.rb", "config/routes.rb", "config/settings.yml"], "create": ["db/migrate/20260702160002_add_magic_link_to_users.rb", "app/services/magic_link_service.rb", "app/mailers/guest_mailer.rb", "app/controllers/api/v1/auth/magic_links_controller.rb", "app/controllers/api/v1/auth/activations_controller.rb", "config/locales/magic_link.en.yml", "test/services/magic_link_service_test.rb"], "reference": ["app/controllers/api/v1/auth/sessions_controller.rb"]}}
+{"thought": "routes.rb read, user.rb read, sessions_controller.rb read as reference, update_health_summary_service.rb read, serializers listed, settings.yml read — all modify files read", "tool": "done", "args": {"modify": ["app/models/user.rb", "app/jobs/spark_scoring_job.rb", "config/routes.rb", "config/settings.yml"], "create": ["db/migrate/20260702160002_add_magic_link_to_users.rb", "app/services/magic_link_service.rb", "app/mailers/guest_mailer.rb", "app/controllers/api/v1/auth/magic_links_controller.rb", "app/controllers/api/v1/auth/activations_controller.rb", "config/locales/magic_link.en.yml"], "reference": ["app/controllers/api/v1/auth/sessions_controller.rb"]}}
