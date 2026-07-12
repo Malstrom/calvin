@@ -28,21 +28,6 @@ steps:
       Read the current issue body and any linked issues or epics referenced
       in the title or body. Understand what Igor wants to achieve.
 
-  - name: read_calvin_context
-    description: |
-      Read ALL .calvin/* files from the TARGET repo
-      (e.g. synca/backend/api/.calvin/):
-        - .calvin/stack.yml
-        - .calvin/conventions.yml
-        - .calvin/testing.yml
-        - .calvin/decisions.yml
-        - .calvin/schema.yml
-      These files are the authoritative spec for the project.
-      Read them fully — they inform what fields are relevant and what
-      constraints apply (e.g. auth patterns, error format, job conventions).
-      Do NOT use them to fill "Entry points" or "Touched files" — those
-      fields do not exist in the new templates.
-
   - name: fill_template
     description: |
       Fill the appropriate template for the issue type identified in step 1.
@@ -94,4 +79,3 @@ constraints:
   - The issue body describes WHAT, never HOW.
   - All fields mandatory for the chosen template type — no exceptions.
   - Templates location: templates/ in the Calvin repo.
-  - Context source: .calvin/* in the TARGET repo (read fully).
