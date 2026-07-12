@@ -3,7 +3,7 @@
 # Aggiungere nuovi modelli, path o parametri qui — nessun cambio al codice Ruby necessario.
 
 react:
-  max_turns: 30
+  max_turns: 20
   grace_turns: 2
   not_found_limit: 3
 
