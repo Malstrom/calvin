@@ -11,6 +11,8 @@ Deliver a complete, working implementation of the issue:
 - One test file per non-trivial non-model file you create or modify
 - A PR description explaining what you did
 
+Output FILE blocks **only** for files declared in `modify` or `create` during exploration. Never output a FILE block for a path that was not in the explore plan.
+
 # Working Principles
 
 - **Follow the codebase, not your assumptions.** Every pattern you use must have been seen in a file you read during exploration. If you did not read a reference, do not invent the pattern.

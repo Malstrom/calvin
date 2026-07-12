@@ -58,9 +58,9 @@ NOT_FOUND means the file does not exist yet — you will create it. Immediately 
 
 Never search for another file that also does not exist. After 3 consecutive NOT_FOUND, call `done` immediately.
 
-## Step 4 — minimum reads before `done`
+## Step 4 — consult active rules
 
-Do NOT call `done` unless all of the following are true:
+Apply any rules injected above before calling `done`.
 
 ## Step 5 — call done
 
@@ -86,12 +86,15 @@ No questions. No explanations.
 
 # Examples
 
-{"thought": "start by locating auth routes in a large routes file", "tool": "grep", "args": {"pattern": "auth", "path": "config/routes.rb"}}
-{"thought": "now read routes to understand the surrounding namespace structure", "tool": "read_file", "args": {"path": "config/routes.rb"}}
-{"thought": "need migration timestamp floor", "tool": "list_dir", "args": {"path": "db/migrate"}}
-{"thought": "read latest migration to confirm version class and timestamp", "tool": "read_file", "args": {"path": "db/migrate/20260702160000_add_account_type_to_users.rb"}}
-{"thought": "plan to create a service — read one existing service as reference", "tool": "list_dir", "args": {"path": "app/services"}}
-{"thought": "read reference service before writing mine", "tool": "read_file", "args": {"path": "app/services/update_profile_service.rb"}}
-{"thought": "plan to create a serializer — check if one already exists for this model", "tool": "list_dir", "args": {"path": "app/serializers"}}
-{"thought": "HealthSummarySerializer exists — read it to get exact attribute names", "tool": "read_file", "args": {"path": "app/serializers/health_summary_serializer.rb"}}
-{"thought": "I have read routes, a reference controller, service, serializer, fixture files, and test helper — all modify files read — minimum checklist satisfied", "tool": "done", "args": {"modify": ["app/jobs/spark_scoring_job.rb"], "create": ["app/services/magic_link_service.rb", "app/mailers/guest_mailer.rb"], "reference": ["app/controllers/api/v1/auth/sessions_controller.rb"]}}
+{"thought": "grep to locate auth namespace in routes", "tool": "grep", "args": {"pattern": "auth", "path": "config/routes.rb"}}
+{"thought": "read full routes to understand namespace and existing endpoints", "tool": "read_file", "args": {"path": "config/routes.rb"}}
+{"thought": "list migrations to find timestamp floor", "tool": "list_dir", "args": {"path": "db/migrate"}}
+{"thought": "read latest migration for version class and timestamp", "tool": "read_file", "args": {"path": "db/migrate/20260702160001_add_declared_preferences_to_preference_profiles.rb"}}
+{"thought": "task adds columns to User — must read model before declaring modify", "tool": "read_file", "args": {"path": "app/models/user.rb"}}
+{"thought": "task uses configurable TTL — read settings to know existing structure", "tool": "read_file", "args": {"path": "config/settings.yml"}}
+{"thought": "task introduces new endpoint — read existing auth controller as reference", "tool": "read_file", "args": {"path": "app/controllers/api/v1/auth/sessions_controller.rb"}}
+{"thought": "read existing service as pattern reference", "tool": "read_file", "args": {"path": "app/services/update_health_summary_service.rb"}}
+{"thought": "list serializers to check if one exists for User", "tool": "list_dir", "args": {"path": "app/serializers"}}
+{"thought": "read test_helper for test setup pattern", "tool": "read_file", "args": {"path": "test/test_helper.rb"}}
+{"thought": "read users fixture before writing tests", "tool": "read_file", "args": {"path": "test/fixtures/users.yml"}}
+{"thought": "routes.rb read, user.rb read, sessions_controller.rb read as reference, update_health_summary_service.rb read, serializers listed, test_helper.rb read, users.yml read, settings.yml read — all modify files read", "tool": "done", "args": {"modify": ["app/models/user.rb", "app/jobs/spark_scoring_job.rb", "config/routes.rb", "config/settings.yml"], "create": ["db/migrate/20260702160002_add_magic_link_to_users.rb", "app/services/magic_link_service.rb", "app/mailers/guest_mailer.rb", "app/controllers/api/v1/auth/magic_links_controller.rb", "app/controllers/api/v1/auth/activations_controller.rb", "config/locales/magic_link.en.yml", "test/services/magic_link_service_test.rb"], "reference": ["app/controllers/api/v1/auth/sessions_controller.rb"]}}
