@@ -22,6 +22,9 @@
 #
 # .parse(content)         → Array<{ path: String, content: String }>
 # .parse_pr_body(content) → String | nil
+#
+# Nota: i file sotto test/ e spec/ vengono scartati automaticamente come
+# safety net — i test sono gestiti in una fase separata.
 
 module Calvin
   class FileParser
@@ -33,7 +36,20 @@ module Calvin
 
     PR_BODY_BLOCK = /^PR_BODY_START\s*\n(.*?)\nPR_BODY_END/m
 
+    # Percorsi test da escludere sempre — i test sono generati in una fase separata.
+    TEST_PATH_PREFIXES = %w[test/ spec/].freeze
+
     def self.parse(content)
+      files = parse_raw(content)
+      files.reject { |f| TEST_PATH_PREFIXES.any? { |prefix| f[:path].start_with?(prefix) } }
+    end
+
+    def self.parse_pr_body(content)
+      match = content.match(PR_BODY_BLOCK)
+      match&.captures&.first&.strip
+    end
+
+    private_class_method def self.parse_raw(content)
       # Prova prima il formato con fence
       fenced = content.scan(FILE_BLOCK_FENCED).map do |path, file_content|
         { path: path.strip, content: file_content }
@@ -44,11 +60,6 @@ module Calvin
       content.scan(FILE_BLOCK_PLAIN).map do |path, file_content|
         { path: path.strip, content: file_content.rstrip }
       end
-    end
-
-    def self.parse_pr_body(content)
-      match = content.match(PR_BODY_BLOCK)
-      match&.captures&.first&.strip
     end
   end
 end
