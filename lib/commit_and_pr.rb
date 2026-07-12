@@ -16,15 +16,18 @@
 #
 # Uso:
 #   Calvin::CommitAndPr.call(
-#     files:         [ {path:, content:} ],
-#     issue:         issue,
-#     github:        github_client,
-#     usage:         hash | nil,
-#     usage_explore: hash | nil,
-#     turns:         integer | nil,
-#     retrieval:     RetrievalResult | nil,
-#     description:   string | nil
+#     files:                [ {path:, content:} ],
+#     issue:                issue,
+#     github:               github_client,
+#     usage:                hash | nil,
+#     usage_explore:        hash | nil,
+#     turns:                integer | nil,
+#     retrieval_explore:    RetrievalResult | nil,
+#     retrieval_implement:  RetrievalResult | nil,
+#     description:          string | nil
 #   ) → Success({ pr_url:, branch:, files: }) | Failure({ step:, error: })
+#
+# Retrocompatibilità: retrieval: ancora accettato come alias di retrieval_explore.
 
 require "dry/monads"
 require_relative "pr_body_builder"
@@ -34,7 +37,10 @@ module Calvin
     include Dry::Monads[:result]
     extend self
 
-    def call(files:, issue:, github:, usage: nil, usage_explore: nil, turns: nil, retrieval: nil, description: nil)
+    def call(files:, issue:, github:, usage: nil, usage_explore: nil, turns: nil,
+             retrieval_explore: nil, retrieval_implement: nil,
+             retrieval: nil,        # retrocompatibilità — alias di retrieval_explore
+             description: nil)
       run_id    = ENV.fetch("GITHUB_RUN_ID", Time.now.to_i.to_s)
       branch    = build_branch(issue, run_id)
       timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
@@ -57,12 +63,13 @@ module Calvin
       pr = github.create_pull_request(
         title: pr_title,
         body:  PrBodyBuilder.build(
-          issue:         issue,
-          usage:         usage,
-          usage_explore: usage_explore,
-          turns:         turns,
-          description:   description,
-          retrieval:     retrieval
+          issue:                issue,
+          usage:                usage,
+          usage_explore:        usage_explore,
+          turns:                turns,
+          description:          description,
+          retrieval_explore:    retrieval_explore || retrieval,
+          retrieval_implement:  retrieval_implement
         ),
         head:  branch
       )
