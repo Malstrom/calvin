@@ -34,7 +34,8 @@
 # Default: "rails".
 #
 # .run -> { content: String, turns: Integer, usage: Hash | nil,
-#           usage_explore: Hash, temperature: Float }
+#           usage_explore: Hash, temperature: Float,
+#           retrieval_explore: RetrievalResult, retrieval_implement: RetrievalResult }
 
 require "json"
 require_relative "file_parser"
@@ -54,11 +55,11 @@ module Calvin
 
       # retrieval_explore: regole orientamento, query da title+body (top_k_explore)
       # Passato dall'esterno da ExploreFlow prima che il loop parta.
-      @retrieval_explore = retrieval || RetrievalResult.new(rules: nil, context: nil)
+      @retrieval_explore = retrieval || RetrievalResult.new(rules: nil, context: nil, chunks: [])
 
       # retrieval_implement: regole codegen, query dai path file_plan (top_k_implement)
       # Popolato internamente subito dopo done() — quando il file_plan è noto.
-      @retrieval_implement = RetrievalResult.new(rules: nil, context: nil)
+      @retrieval_implement = RetrievalResult.new(rules: nil, context: nil, chunks: [])
 
       @mistral      = MistralClient.new
       @observations     = []
@@ -77,7 +78,8 @@ module Calvin
     end
 
     # Ritorna { content: String, turns: Integer, usage: Hash | nil,
-    #           usage_explore: Hash, temperature: Float }
+    #           usage_explore: Hash, temperature: Float,
+    #           retrieval_explore: RetrievalResult, retrieval_implement: RetrievalResult }
     def run
       MAX_TURNS.times do |i|
         n      = i + 1
@@ -168,7 +170,7 @@ module Calvin
         # Fatto qui — dopo done(), prima di implement_phase — così la query
         # riflette esattamente i file che verranno generati o modificati.
         @retrieval_implement = Calvin::ContextRetriever.call_for_implement(@file_plan)
-        Calvin::LOG.info "retrieval_implement: #{@retrieval_implement.rules&.bytesize || 0} bytes"
+        Calvin::LOG.info "retrieval_implement: #{@retrieval_implement.rules&.bytesize || 0} bytes, #{@retrieval_implement.chunks.size} chunks"
 
         return :done
       end
@@ -268,11 +270,13 @@ module Calvin
       )
 
       {
-        content:       response[:content],
-        turns:         turns,
-        usage:         response[:usage],
-        usage_explore: @usage_explore,
-        temperature:   @temp_implement
+        content:              response[:content],
+        turns:                turns,
+        usage:                response[:usage],
+        usage_explore:        @usage_explore,
+        temperature:          @temp_implement,
+        retrieval_explore:    @retrieval_explore,
+        retrieval_implement:  @retrieval_implement
       }
     end
 

@@ -5,16 +5,17 @@
 #   ContextRetriever.call_for_explore(issue)      => RetrievalResult
 #   ContextRetriever.call_for_implement(file_plan) => RetrievalResult
 #
-# RetrievalResult = Data.define(:rules, :context)
+# RetrievalResult = Data.define(:rules, :context, :chunks)
 #   .rules   => String formattata con le regole attive, o nil se nessuna trovata
 #   .context => nil (predisposto per source_type futuri)
+#   .chunks  => Array di hash raw { "content", "source_path", "similarity" } o []
 #
 # Flusso explore:
 #   1. Costruisce query da issue.title + issue.body (limit: rag.query_body_limit, default 2000)
 #   2. Chiama mistral-embed per l'embedding (1024 dim)
 #   3. Chiama RPC calvin_rules_search su Supabase (top_k: rag.top_k_explore)
 #   4. Filtra chunk con similarity < rag.similarity_threshold (default 0.60)
-#   5. Ritorna RetrievalResult con regole formattate
+#   5. Ritorna RetrievalResult con regole formattate e chunks raw
 #
 # Flusso implement:
 #   1. Costruisce query dai path del file_plan (modify + create) tramite path_to_query
@@ -29,7 +30,7 @@ require "net/http"
 require "json"
 
 module Calvin
-  RetrievalResult = Data.define(:rules, :context)
+  RetrievalResult = Data.define(:rules, :context, :chunks)
 
   class ContextRetriever
     EMBED_URL    = URI("https://api.mistral.ai/v1/embeddings")
@@ -71,7 +72,7 @@ module Calvin
 
       if paths.empty?
         Calvin::LOG.info "ContextRetriever[implement]: nessun path nel file_plan — skip"
-        return RetrievalResult.new(rules: nil, context: nil)
+        return RetrievalResult.new(rules: nil, context: nil, chunks: [])
       end
 
       query = build_file_plan_query(paths)
@@ -132,7 +133,7 @@ module Calvin
     def call_with_query(query, top_k:, phase: "unknown")
       unless supabase_configured?
         Calvin::LOG.info "ContextRetriever[#{phase}]: Supabase non configurato — skip"
-        return RetrievalResult.new(rules: nil, context: nil)
+        return RetrievalResult.new(rules: nil, context: nil, chunks: [])
       end
 
       Calvin::LOG.info "ContextRetriever[#{phase}]: query = #{query[0..120]}..."
@@ -144,16 +145,16 @@ module Calvin
 
       if chunks.empty?
         Calvin::LOG.info "ContextRetriever[#{phase}]: nessuna regola trovata (#{raw.size} recuperate, tutte sotto soglia)"
-        return RetrievalResult.new(rules: nil, context: nil)
+        return RetrievalResult.new(rules: nil, context: nil, chunks: [])
       end
 
       Calvin::LOG.info "ContextRetriever[#{phase}]: #{chunks.size}/#{raw.size} regola/e accettate (threshold=#{similarity_threshold})"
       log_chunks(chunks, phase)
 
-      RetrievalResult.new(rules: format_rules(chunks), context: nil)
+      RetrievalResult.new(rules: format_rules(chunks), context: nil, chunks: chunks)
     rescue => e
       Calvin::LOG.warn "ContextRetriever[#{phase}]: fallback silenzioso (#{e.message})"
-      RetrievalResult.new(rules: nil, context: nil)
+      RetrievalResult.new(rules: nil, context: nil, chunks: [])
     end
 
     private
