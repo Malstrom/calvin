@@ -1,7 +1,8 @@
 # frozen_string_literal: true
-# SupabaseStore — upsert e similarity search chunk su Supabase via REST API.
+# SupabaseStore — upsert, delete e similarity search chunk su Supabase via REST API.
 #
 # Ingestion::SupabaseStore.new.upsert(repo:, source_type:, source_path:, content:, embedding:)
+# Ingestion::SupabaseStore.new.delete_by_source_path(repo:, source_path:)
 # Ingestion::SupabaseStore.new.similar_to(embedding, repo:, threshold: 0.92, limit: 1)
 # => [{ "source_path" => "rule/38/2", "content" => "...", "similarity" => 0.9431 }]
 #
@@ -30,7 +31,7 @@ module Ingestion
       uri  = URI("#{@url}/rest/v1/calvin_chunks")
       http = build_http(uri)
 
-      req              = Net::HTTP::Post.new(uri)
+      req           = Net::HTTP::Post.new(uri)
       set_headers(req)
       req["Prefer"] = "resolution=merge-duplicates"
 
@@ -46,6 +47,22 @@ module Ingestion
       resp = http.request(req)
       body = resp.body.to_s.force_encoding("UTF-8")
       raise "Supabase upsert error: #{resp.code} #{body}" unless resp.is_a?(Net::HTTPSuccess)
+
+      true
+    end
+
+    # Elimina tutti i chunk con il dato source_path nel repo.
+    # Usato dalla strategia replace: rimuove il vecchio chunk prima di inserire il nuovo.
+    def delete_by_source_path(repo:, source_path:)
+      uri  = URI("#{@url}/rest/v1/calvin_chunks?repo=eq.#{URI.encode_uri_component(repo)}&source_path=eq.#{URI.encode_uri_component(source_path)}")
+      http = build_http(uri)
+
+      req = Net::HTTP::Delete.new(uri)
+      set_headers(req)
+
+      resp = http.request(req)
+      body = resp.body.to_s.force_encoding("UTF-8")
+      raise "Supabase delete error: #{resp.code} #{body}" unless resp.is_a?(Net::HTTPSuccess)
 
       true
     end

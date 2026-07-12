@@ -8,8 +8,11 @@
 # Flusso:
 #   1. RulesFetcher legge i commenti della PR, trova <!-- calvin:rules -->
 #   2. Estrae solo i bullet checkati (- [x])
-#   3. Per ogni bullet: embedding -> dedup check -> upsert o skip
-#   4. Log completo di ogni chunk (contenuto intero + esito)
+#   3. Per ogni bullet: embedding -> dedup check -> replace o upsert
+#      Se similarity >= DEDUP_THRESHOLD: elimina il vecchio, inserisce il nuovo (replace)
+#      Se nessun simile: inserisce direttamente (upsert)
+#   4. Dopo tutti i chunk: se ci sono stati replace, posta un commento riepilogativo
+#      sulla PR con vecchia regola vs nuova regola + similarity score
 #
 # Rate limiting: gestito direttamente da Embedder (exponential backoff su 429).
 
@@ -23,7 +26,7 @@ DEDUP_THRESHOLD = Calvin::CONFIG.dig(:rag, :dedup_threshold) ||
                   Calvin::CONFIG.dig(:rag, "dedup_threshold") ||
                   0.92
 
-# ── CLI ──────────────────────────────────────────────────────────────────────────────
+# ── CLI ──────────────────────────────────────────────────────────────────────────
 options = {}
 OptionParser.new do |opts|
   opts.banner = "Usage: ruby bin/ingest.rb --repo OWNER/REPO --pr NUMBER"
@@ -39,11 +42,12 @@ pr_number = options[:pr_number]
 store     = Ingestion::SupabaseStore.new
 embedder  = Ingestion::Embedder.new
 
-total_upserted = 0
-total_skipped  = 0
-errors         = []
+total_upserted  = 0
+total_replaced  = 0
+errors          = []
+replacements    = [] # { old_content:, old_source_path:, new_content:, similarity: }
 
-# ── FETCH RULES ─────────────────────────────────────────────────────────────────────
+# ── FETCH RULES ──────────────────────────────────────────────────────────────────────────
 puts "[ingest] Fetching rules from PR ##{pr_number} in #{repo}..."
 
 chunks = Ingestion::RulesFetcher.from_pr(repo, pr_number)
@@ -56,7 +60,7 @@ end
 puts "[ingest] #{chunks.size} rule(s) to process"
 puts ""
 
-# ── PROCESS EACH CHUNK ───────────────────────────────────────────────────────────────────
+# ── PROCESS EACH CHUNK ───────────────────────────────────────────────────────────────────────
 chunks.each do |chunk|
   puts "[ingest] ── #{chunk[:source_path]} ─" * 2
   chunk[:content].each_line { |l| puts "[ingest] #{l.rstrip}" }
@@ -70,14 +74,26 @@ chunks.each do |chunk|
 
     if similar.any?
       existing = similar.first
-      puts "[ingest] → SKIPPED (similar chunk exists)"
-      puts "[ingest]   match:    #{existing['source_path']} (similarity=#{format('%.4f', existing['similarity'])})"
-      puts "[ingest]   existing: #{existing['content'].to_s.lines.map(&:rstrip).join("\n[ingest]             ")}"
-      total_skipped += 1
-      next
+      sim      = existing["similarity"].to_f
+
+      puts "[ingest] → REPLACE (similar chunk found, similarity=#{format('%.4f', sim)})"
+      puts "[ingest]   replacing: #{existing['source_path']}"
+      puts "[ingest]   old: #{existing['content'].to_s.lines.first.to_s.rstrip}"
+
+      # Elimina il vecchio chunk e inserisce il nuovo
+      store.delete_by_source_path(repo: repo, source_path: existing["source_path"])
+
+      replacements << {
+        old_content:     existing["content"].to_s.strip,
+        old_source_path: existing["source_path"],
+        new_content:     chunk[:content].to_s.strip,
+        similarity:      sim
+      }
+
+      total_replaced += 1
     end
 
-    # — upsert ────────────────────────────────────────────────────────────────────────────────
+    # — upsert (nuovo o sostitutivo) ───────────────────────────────────────────────────────────────
     store.upsert(
       repo:        repo,
       source_type: chunk[:source_type],
@@ -96,7 +112,51 @@ chunks.each do |chunk|
   puts ""
 end
 
-# ── SUMMARY ──────────────────────────────────────────────────────────────────────────────
-puts "[ingest] ✅ Done. upserted=#{total_upserted} skipped=#{total_skipped} errors=#{errors.size}"
+# ── POST REPLACEMENT COMMENT ────────────────────────────────────────────────────────────
+if replacements.any?
+  github_token = ENV.fetch("GITHUB_TOKEN")
+  owner, repo_name = repo.split("/")
+
+  rows = replacements.map.with_index(1) do |r, i|
+    <<~ROW
+      ### Replacement #{i} — similarity #{format('%.4f', r[:similarity])}
+
+      **Replaced** (`#{r[:old_source_path]}`):
+      > #{r[:old_content].gsub("\n", "\n> ")}
+
+      **New rule**:
+      > #{r[:new_content].gsub("\n", "\n> ")}
+    ROW
+  end.join("\n")
+
+  body = <<~COMMENT
+    ## ♻️ Calvin ingest — #{replacements.size} rule(s) replaced
+
+    #{rows}
+    ---
+    _Old rules were removed from the vector DB and replaced with the new versions above._
+  COMMENT
+
+  uri = URI("https://api.github.com/repos/#{owner}/#{repo_name}/issues/#{pr_number}/comments")
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = true
+
+  req = Net::HTTP::Post.new(uri)
+  req["Authorization"]   = "Bearer #{github_token}"
+  req["Content-Type"]    = "application/json"
+  req["Accept"]          = "application/vnd.github+json"
+  req["X-GitHub-Api-Version"] = "2022-11-28"
+  req.body = { body: body }.to_json
+
+  resp = http.request(req)
+  if resp.is_a?(Net::HTTPSuccess)
+    puts "[ingest] replacement comment posted on PR ##{pr_number}"
+  else
+    puts "[ingest] WARN: could not post replacement comment: #{resp.code} #{resp.body}"
+  end
+end
+
+# ── SUMMARY ────────────────────────────────────────────────────────────────────────────
+puts "[ingest] ✅ Done. upserted=#{total_upserted} replaced=#{total_replaced} errors=#{errors.size}"
 errors.each { |e| puts "  ✗ #{e}" }
 exit(errors.any? ? 1 : 0)
