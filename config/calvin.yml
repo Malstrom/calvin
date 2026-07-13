@@ -11,6 +11,7 @@ sampling:
   temperature:
     explore:    0.0   # ReAct loop — deterministico: evita drift architetturale tra run identiche
     implement:  0.0   # Codegen puro — massima riproducibilità
+    test:       0.0   # TestWriter — codegen deterministico
     pr_review:  0.0   # PrReviewFlow — deterministico
   max_tokens: 8192
 
@@ -61,6 +62,9 @@ rag:
   # Può essere più alto perché la query è più precisa e il segnale/rumore è migliore.
   top_k_implement: 20
 
+  # Fase 3 — test: fixtures + test_helper + rules per il file da testare.
+  top_k_test: 20
+
   # Chunk generici — predisposto per source_type futuri (scenari, docs, contratti).
   top_k_context: 5
 
@@ -71,3 +75,4 @@ rag:
   similarity_threshold:
     explore:    0.60   # fase explore — query lunga, soglia alta per tenere solo regole rilevanti
     implement:  0.52   # fase implement — query da path più corta, soglia più bassa per non perdere segnale
+    test:       0.52   # fase test — stessa logica di implement
