@@ -40,6 +40,12 @@ repo:
     rails:   backend/api
     flutter: frontend/mobile
 
+# Path specifici del progetto target (synca).
+# Usati da FixturesFetcher per localizzare fixtures e test_helper.
+project:
+  fixtures_dir:     backend/api/test/fixtures
+  test_helper_path: backend/api/test/test_helper.rb
+
 pricing:
   models:
     codestral-latest:
@@ -53,13 +59,9 @@ rag:
   target_repo: Malstrom/synca
 
   # Fase 1 — explore: regole iniettate nel system prompt per orientare l'esplorazione.
-  # Tenere basso: il modello usa queste regole per decidere dove leggere, non per scrivere codice.
-  # Troppe regole nel system prompt di explore aumentano il rumore e distraggono dalla direzione.
   top_k_explore: 20
 
   # Fase 2 — implement: regole iniettate nell'user message come ultima sezione (recency bias).
-  # La query è costruita dai path del file_plan → regole molto più specifiche al codice da generare.
-  # Può essere più alto perché la query è più precisa e il segnale/rumore è migliore.
   top_k_implement: 20
 
   # Fase 3 — test: fixtures + test_helper + rules per il file da testare.
@@ -73,6 +75,6 @@ rag:
   query_body_limit: 2000    # caratteri del body inclusi nella query di embedding explore
 
   similarity_threshold:
-    explore:    0.60   # fase explore — query lunga, soglia alta per tenere solo regole rilevanti
-    implement:  0.52   # fase implement — query da path più corta, soglia più bassa per non perdere segnale
-    test:       0.52   # fase test — stessa logica di implement
+    explore:    0.60
+    implement:  0.52
+    test:       0.52
