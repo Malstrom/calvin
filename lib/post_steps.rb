@@ -111,23 +111,14 @@ module Calvin
     private_class_method :pr_number_from_url
 
     def self.post_test_comment(github, pr_number, stats)
-      written = stats[:tests_written]
-      errors  = stats[:writer_errors]
-      skipped = stats[:tests_skipped]
-
-      error_row = errors > 0 ? "| ❌ errori writer | #{errors} |\n        " : ""
-
-      body = <<~MD
-        ### 🧪 Test generation
-        | | |
-        |---|---|
-        | ✅ test scritti | #{written} |
-        #{error_row}| ⏭️ saltati (non testabili) | #{skipped} |
-
-        _I test sono stati generati da Calvin ma non eseguiti — verifica manuale necessaria._
-      MD
-
-      github.post_pr_comment(pr_number, body.strip)
+      body = Calvin::PrBodyBuilder.test_comment(
+        stats[:tests_written],
+        stats[:writer_errors],
+        stats[:tests_skipped],
+        usage:       stats[:usage_total],
+        retrievals:  stats[:retrievals]
+      )
+      github.post_pr_comment(pr_number, body)
     rescue => e
       Calvin::LOG.warn "PostSteps: post_test_comment fallito — #{e.message}"
     end

@@ -2,7 +2,7 @@
 # Scrive il file di test per un singolo file sorgente.
 #
 # .call(source_path, github:, mistral:)
-#   → Success({ path: String, content: String, usage: Hash })
+#   → Success({ path: String, content: String, usage: Hash, retrieval: RetrievalResult })
 #   | Failure({ step: :test_writer, error: String })
 #
 # .fix(test_path, test_content, error_output, source_path, github:, mistral:)
@@ -72,7 +72,8 @@ module Calvin
       )
 
       result = parse_response(response[:content], test_path)
-      Success(result.merge(usage: response[:usage]))
+      # Ritorna anche il retrieval per il commento PR
+      Success(result.merge(usage: response[:usage], retrieval: retrieval))
     rescue => e
       Failure(step: :test_writer, error: e.message)
     end

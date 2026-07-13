@@ -2,7 +2,8 @@
 # TestFlow — scrive i file di test per tutti i path testabili di un file_plan.
 #
 # .call(source_paths, branch:, github:, mistral:)
-#   => Success({ tests_written: Integer, writer_errors: Integer, tests_skipped: Integer, written: [...] })
+#   => Success({ tests_written: Integer, writer_errors: Integer, tests_skipped: Integer,
+#                written: [...], usage_total: Hash, retrievals: [...] })
 #    | Failure({ step: :test_flow, error: String })
 #
 # source_paths: Array di path (output del file_plan di implement)
@@ -32,13 +33,16 @@ module Calvin
 
       if testable.empty?
         Calvin::LOG.info "TestFlow: nessun path testabile trovato — skip"
-        return Success(tests_written: 0, writer_errors: 0, tests_skipped: skipped, written: [])
+        return Success(tests_written: 0, writer_errors: 0, tests_skipped: skipped,
+                       written: [], usage_total: nil, retrievals: [])
       end
 
       Calvin::LOG.info "TestFlow: #{testable.size} path testabili: #{testable.inspect}"
 
-      writer_errors = 0
+      writer_errors   = 0
       files_to_commit = []
+      retrievals      = []
+      usages          = []
 
       testable.each do |source_path|
         result = TestWriter.call(source_path, github: github, mistral: mistral)
@@ -52,6 +56,8 @@ module Calvin
         test = result.value!
         Calvin::LOG.info "TestFlow: generato #{test[:path]} (usage=#{test[:usage].inspect})"
         files_to_commit << { path: test[:path], content: test[:content] }
+        usages     << test[:usage]     if test[:usage]
+        retrievals << test[:retrieval] if test[:retrieval]
       end
 
       if files_to_commit.any?
@@ -71,13 +77,22 @@ module Calvin
         end
       end
 
-      written = files_to_commit
+      # Aggrega usage di tutti i test scritti
+      usage_total = if usages.any?
+        {
+          "prompt_tokens"     => usages.sum { |u| u["prompt_tokens"].to_i },
+          "completion_tokens" => usages.sum { |u| u["completion_tokens"].to_i },
+          "cached_tokens"     => usages.sum { |u| u["cached_tokens"].to_i }
+        }
+      end
 
       Success(
-        tests_written: written.size,
+        tests_written: files_to_commit.size,
         writer_errors: writer_errors,
         tests_skipped: skipped,
-        written:       written
+        written:       files_to_commit,
+        usage_total:   usage_total,
+        retrievals:    retrievals
       )
     rescue => e
       Failure(step: :test_flow, error: e.message)
