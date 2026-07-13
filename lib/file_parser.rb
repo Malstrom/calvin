@@ -33,6 +33,10 @@ module Calvin
 
     PR_BODY_BLOCK = /^PR_BODY_START\s*\n(.*?)\nPR_BODY_END/m
 
+    # Test generation disabled — Calvin does not yet write reliable tests.
+    # Remove this filter once test quality is validated.
+    # SKIP_PATTERN = %r{^test/}
+
     def self.parse(content)
       # Prova prima il formato con fence
       fenced = content.scan(FILE_BLOCK_FENCED).map do |path, file_content|
