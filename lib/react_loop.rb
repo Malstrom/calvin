@@ -67,6 +67,7 @@ module Calvin
       @file_plan        = nil
       @json_failures    = 0
       @not_found_streak = 0
+      @explore_start    = nil
 
       @usage_explore = {
         "prompt_tokens"     => 0,
@@ -83,13 +84,16 @@ module Calvin
     end
 
     def run
-      Calvin.banner("EXPLORE", emoji: "🔍")
-      Calvin::LOG.info "cache_key=#{@explore_cache_key}  stack=#{@stack}  temp=#{@temp_explore}"
+      Calvin.phase_start(:explore, "max=#{MAX_TURNS}  temp=#{@temp_explore}  stack=#{@stack}")
+      @explore_start = Time.now
+      Calvin::LOG.info "cache_key=#{@explore_cache_key}"
 
+      final_turns = MAX_TURNS
       MAX_TURNS.times do |i|
         n      = i + 1
         result = process_turn(n)
         if result == :done
+          final_turns = n
           verify_observations
           return implement_phase(n)
         end
@@ -259,20 +263,28 @@ module Calvin
     # ---------------------------------------------------------------------------
 
     def implement_phase(turns)
-      Calvin.banner("IMPLEMENT", emoji: "✏️")
+      elapsed = @explore_start ? (Time.now - @explore_start).round(1) : nil
       ep = @usage_explore["prompt_tokens"]
       ec = @usage_explore["completion_tokens"]
       ca = @usage_explore["cached_tokens"]
-      Calvin::LOG.info "explore summary  turns=#{turns}  in=#{ep} cached=#{ca} out=#{ec}  temp=#{@temp_implement}"
+
+      Calvin.phase_end(:explore, "turns=#{turns}#{elapsed ? "  #{elapsed}s" : ""}  in=#{ep} cached=#{ca} out=#{ec}")
+
+      # Stampa lista compatta dei file letti — separata dal flusso di explore
+      Calvin.files_read_summary(@observations)
 
       active_retrieval = @retrieval_implement.chunks.any? ? @retrieval_implement : @retrieval_explore
       source_label     = @retrieval_implement.chunks.any? ? "implement" : "explore(fallback)"
-      Calvin::LOG.info "rag source=#{source_label}  chunks=#{active_retrieval.chunks.size}"
+
+      Calvin.phase_start(:implement, "rag=#{source_label}  chunks=#{active_retrieval.chunks.size}  temp=#{@temp_implement}")
+      impl_start = Time.now
 
       response = @mistral.complete_messages(
         build_implement_messages,
         temperature: @temp_implement
       )
+
+      impl_elapsed = (Time.now - impl_start).round(1)
 
       if response[:usage]
         pt = response[:usage]["prompt_tokens"].to_i
@@ -280,7 +292,8 @@ module Calvin
         Calvin::LOG.info "#{Color::DIM}tokens  in=#{pt} out=#{ct}#{Color::RESET}"
       end
 
-      Calvin.done("implement done  #{(response[:content].bytesize / 1024.0).round(1)} KB output")
+      out_kb = (response[:content].bytesize / 1024.0).round(1)
+      Calvin.phase_end(:implement, "#{out_kb} KB output  #{impl_elapsed}s")
 
       {
         content:              response[:content],
@@ -379,7 +392,8 @@ module Calvin
               else tool
               end
 
-      @observations << { label: label, content: observation.force_encoding("UTF-8") }
+      kb = (observation.bytesize / 1024.0).round(1)
+      @observations << { label: label, content: observation.force_encoding("UTF-8"), kb: kb }
     end
 
     # ---------------------------------------------------------------------------

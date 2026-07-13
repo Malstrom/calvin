@@ -63,7 +63,7 @@ module Calvin
 
       exp_c = result[:retrieval_explore].chunks.size
       imp_c = result[:retrieval_implement].chunks.size
-      Calvin.done("react_loop  turns=#{result[:turns]}  rag_explore=#{exp_c}  rag_implement=#{imp_c}")
+      Calvin::LOG.info "react_loop done  turns=#{result[:turns]}  rag_explore=#{exp_c}  rag_implement=#{imp_c}"
 
       Success(
         issue:                issue,
@@ -102,7 +102,7 @@ module Calvin
     end
 
     def commit_and_pr(issue:, github:, files:, pr_body:, usage:, usage_explore:, temperature:, explore_turns:, retrieval_explore:, retrieval_implement:)
-      Calvin.section("commit + PR")
+      Calvin.phase_start(:commit, "#{files.size} file(s)")
       outcome = CommitAndPr.call(
         issue:                issue,
         github:               github,
@@ -117,7 +117,18 @@ module Calvin
       return Failure(step: :commit_and_pr, error: outcome.failure[:error], usage: usage, explore_turns: explore_turns) if outcome.failure?
 
       result = outcome.value!
-      Calvin.done("PR aperta → #{result[:pr_url]}")
+
+      # ── Flow summary ────────────────────────────────────────────────────────
+      ue = usage_explore || {}
+      ui = usage || {}
+      Calvin.flow_summary([
+        ["explore turns",   explore_turns],
+        ["tokens explore",  "in=#{ue['prompt_tokens']} cached=#{ue['cached_tokens']} out=#{ue['completion_tokens']}"],
+        ["tokens impl",     "in=#{ui['prompt_tokens']} out=#{ui['completion_tokens']}"],
+        ["files written",   files.size],
+        ["PR",              result[:pr_url]]
+      ])
+
       Success(FlowResult.new(
         files:       result[:files],
         branch:      result[:branch],

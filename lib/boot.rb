@@ -25,29 +25,21 @@ module Calvin
     GREEN  = TTY ? "\e[32m" : ""
     GRAY   = TTY ? "\e[90m" : ""
     BLUE   = TTY ? "\e[34m" : ""
+    MAGENTA = TTY ? "\e[35m" : ""
 
-    def self.reset  = RESET
-    def self.bold   = BOLD
-    def self.dim    = DIM
-    def self.cyan   = CYAN
-    def self.yellow = YELLOW
-    def self.red    = RED
-    def self.green  = GREEN
-    def self.gray   = GRAY
-    def self.blue   = BLUE
+    def self.reset   = RESET
+    def self.bold    = BOLD
+    def self.dim     = DIM
+    def self.cyan    = CYAN
+    def self.yellow  = YELLOW
+    def self.red     = RED
+    def self.green   = GREEN
+    def self.gray    = GRAY
+    def self.blue    = BLUE
+    def self.magenta = MAGENTA
   end
 
   # Logger con formatter leggibile.
-  #
-  # Formato base:
-  #   13:16:01  INFO   ExploreFlow  prompt built (1.2 KB)
-  #   13:16:02  WARN   ReActLoop    JSON parse failed (1/2)
-  #
-  # Helper globali per separatori e banner (chiamati direttamente dal codice):
-  #   Calvin::LOG.banner("EXPLORE")    → riga "=" con titolo centrato
-  #   Calvin::LOG.section("turn 3")    → riga "-" con titolo
-  #   Calvin::LOG.file_read(path, kb)  → riga compatta per file letti
-  #   Calvin::LOG.done(msg)            → riga evidenziata per completamento fase
   LOG = Logger.new($stdout).tap do |l|
     l.progname = "calvin"
     l.formatter = proc do |severity, time, _progname, msg|
@@ -65,68 +57,157 @@ module Calvin
     end
   end
 
-  # Banner visivo per separare le fasi principali del flow.
-  # Es: Calvin.banner("EXPLORE")
-  #   ╭──────────────────────────────────────────────────────────────╮
-  #   │  ✧ EXPLORE                                              │
-  #   ╰──────────────────────────────────────────────────────────────╯
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Visual helpers
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  WIDTH = 66
+
+  # Banner principale — usato all'inizio del flow completo.
+  #
+  #   ╭──────────────────────────────────────────────────────────────────╮
+  #   │  🚀 EXPLORE FLOW  •  issue #42                                   │
+  #   ╰──────────────────────────────────────────────────────────────────╯
   def self.banner(title, emoji: "✧")
-    width = 62
-    line  = "─" * width
-    label = "#{emoji} #{title}"
-    pad   = " " * [(width - label.length - 2) / 2, 0].max
-    $stdout.puts "#{Color::CYAN}\n╭#{line}\u256e\n│#{pad}  #{Color::BOLD}#{label}#{Color::RESET}#{Color::CYAN}#{' ' * [width - pad.length - label.length - 2, 0].max}  │\n╰#{line}╯#{Color::RESET}"
+    line  = "─" * WIDTH
+    label = "#{emoji}  #{title}"
+    pad_r = [WIDTH - label.length - 2, 0].max
+    $stdout.puts \
+      "#{Color::CYAN}\n" \
+      "╭#{line}╮\n" \
+      "│  #{Color::BOLD}#{label}#{Color::RESET}#{Color::CYAN}#{' ' * pad_r}│\n" \
+      "╰#{line}╯#{Color::RESET}\n"
+  end
+
+  # Inizio fase — box con doppia riga, colore per fase.
+  #
+  #   ╔══════════════════════════════════════════════════════════════════╗
+  #   ║  🔍 EXPLORE  ·  turn 1..30  ·  temp=0.1                         ║
+  #   ╚══════════════════════════════════════════════════════════════════╝
+  PHASE_COLORS = {
+    explore:   Color::CYAN,
+    implement: Color::MAGENTA,
+    commit:    Color::GREEN
+  }.freeze
+
+  def self.phase_start(phase, subtitle = nil)
+    color = PHASE_COLORS[phase] || Color::CYAN
+    line  = "═" * WIDTH
+    label = phase.to_s.upcase
+    label += "  ·  #{subtitle}" if subtitle
+    pad_r = [WIDTH - label.length - 2, 0].max
+    $stdout.puts \
+      "#{color}\n" \
+      "╔#{line}╗\n" \
+      "║  #{Color::BOLD}#{label}#{Color::RESET}#{color}#{' ' * pad_r}║\n" \
+      "╚#{line}╝#{Color::RESET}\n"
+  end
+
+  # Fine fase — riga singola con durata opzionale.
+  #
+  #   ╸ EXPLORE done  turns=8  00:42  ──────────────────────────────────
+  def self.phase_end(phase, details = nil)
+    color = PHASE_COLORS[phase] || Color::GREEN
+    label = "#{phase.to_s.upcase} done"
+    label += "  #{details}" if details
+    rest  = "─" * [WIDTH - label.length - 3, 4].max
+    $stdout.puts "#{color}╸ #{Color::BOLD}#{label}#{Color::RESET}#{color}  #{rest}#{Color::RESET}\n"
   end
 
   # Separatore leggero tra sotto-sezioni.
-  # Es: Calvin.section("turn 3 / 30")
-  #   ── turn 3 / 30 ──────────────────────────────────────────────
+  #
+  #   ── rag retrieve ─────────────────────────────────────────────────
   def self.section(title)
-    rest  = ["-" * (50 - title.length - 4), ""].max_by(&:length)
+    rest = "─" * [WIDTH - title.length - 5, 4].max
     $stdout.puts "#{Color::BLUE}── #{title} #{rest}#{Color::RESET}"
   end
 
   # Log compatto per file letti durante l'esplorazione.
-  # Evita di stampare le prime N righe del contenuto nel mezzo dei log.
   def self.file_read(path, bytes)
     kb = (bytes / 1024.0).round(1)
     LOG.info "#{Color::GREEN}└ read#{Color::RESET}  #{path}  #{Color::DIM}(#{kb} KB)#{Color::RESET}"
   end
 
-  # Log di completamento fase — evidenziato in verde.
+  # Riepilogo lista file letti a fine fase explore.
+  #
+  #   ┌─ Files read (8) ─────────────────────────────────────────────┐
+  #   │  app/models/user.rb                              1.2 KB       │
+  #   │  app/services/magic_link_service.rb              3.4 KB       │
+  #   └──────────────────────────────────────────────────────────────┘
+  def self.files_read_summary(observations)
+    file_obs = observations.reject { |o| o[:label].start_with?("ls ", "grep ") }
+    return if file_obs.empty?
+
+    inner = WIDTH - 2
+    title = " Files read (#{file_obs.size}) "
+    top   = "┌─#{title}#{"─" * [inner - title.length - 1, 2].max}┐"
+    bot   = "└#{'─' * inner}┘"
+
+    $stdout.puts "#{Color::GRAY}#{top}"
+    file_obs.each do |o|
+      kb_str = o[:kb] ? "#{o[:kb]} KB" : ""
+      label  = o[:label].length > 52 ? "…#{o[:label][-51..]}" : o[:label]
+      row    = "  #{label}"
+      pad    = [inner - row.length - kb_str.length, 1].max
+      $stdout.puts "│#{row}#{' ' * pad}#{kb_str} │"
+    end
+    $stdout.puts "#{bot}#{Color::RESET}"
+  end
+
+  # Log di completamento generico — evidenziato in verde.
   def self.done(msg)
     LOG.info "#{Color::GREEN}✔ #{msg}#{Color::RESET}"
   end
 
-  # Log di un tool call durante explore (thought + tool + args su 2 righe compatte).
+  # Riepilogo tabellare a fine flow.
+  #
+  #   ┌─ Flow summary ───────────────────────────────────────────────┐
+  #   │  explore turns    8                                           │
+  #   │  tokens explore   in=1204 cached=800 out=312                  │
+  #   │  tokens impl      in=8420 out=1103                            │
+  #   │  files written    3                                           │
+  #   │  PR               https://github.com/...                      │
+  #   └──────────────────────────────────────────────────────────────┘
+  def self.flow_summary(rows)
+    inner  = WIDTH - 2
+    title  = " Flow summary "
+    top    = "┌─#{title}#{"─" * [inner - title.length - 1, 2].max}┐"
+    bot    = "└#{'─' * inner}┘"
+
+    $stdout.puts "\n#{Color::GREEN}#{top}"
+    rows.each do |key, val|
+      val_s = val.to_s
+      key_s = "  #{key.to_s.ljust(18)}"
+      pad   = [inner - key_s.length - val_s.length, 1].max
+      # truncate long values (URLs) gracefully
+      if val_s.length > inner - key_s.length - 1
+        val_s = "#{val_s[0...(inner - key_s.length - 4)]}…"
+        pad   = 1
+      end
+      $stdout.puts "│#{key_s}#{' ' * pad}#{val_s} │"
+    end
+    $stdout.puts "#{bot}#{Color::RESET}\n"
+  end
+
+  # Log di un tool call durante explore.
   def self.tool_call(turn, tool, args, thought: nil)
     arg_str = args.map { |k, v| "#{k}=#{v.inspect}" }.join(" ")
-    thought_line = thought ? "  #{Color::DIM}└ #{thought[0..120]}#{Color::RESET}\n" : ""
+    thought_line = thought ? "\n  #{Color::DIM}  └ #{thought[0..120]}#{Color::RESET}" : ""
     $stdout.puts "#{Color::CYAN}  ▶ turn #{turn}#{Color::RESET}  #{Color::BOLD}#{tool}#{Color::RESET}(#{arg_str})#{thought_line}"
   end
 
-  # Config centralizzata — unica fonte di verità per tutti i parametri.
-  # DEVE essere definita prima di qualsiasi require_relative che usa Calvin::CONFIG.
+  # Config centralizzata.
   CONFIG = YAML.load_file(
     File.expand_path("../../config/calvin.yml", __FILE__), symbolize_names: true
   ).freeze
 
-  # Modello attivo — da env o config.
   MODEL = ENV.fetch("CALVIN_MODEL", CONFIG.dig(:model, :default) || "codestral-latest").freeze
 
-  # Repo target — formato "owner/repo".
-  # CALVIN_TARGET_REPO è impostato esplicitamente nel workflow Calvin.
-  # Fallback a GITHUB_REPOSITORY per compatibilità (es. run locali).
   REPO = ENV.fetch("CALVIN_TARGET_REPO") { ENV.fetch("GITHUB_REPOSITORY") }.freeze
 
-  # Roots per repo target (stack => path relativo).
   REPO_ROOTS = (CONFIG.dig(:repo, :roots) || {}).transform_keys(&:to_s).freeze
 end
 
-# Tutti i require_relative vengono DOPO la definizione di Calvin::CONFIG e Calvin::REPO
-# perché alcuni moduli accedono a queste costanti a load-time.
-#
-# Ordine: primitivi → client → parser → flow components → flow → post-steps
 require_relative "flow_result"
 require_relative "mode_router"
 require_relative "github_client"
