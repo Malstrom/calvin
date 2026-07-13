@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 # Scrive il file di test per un singolo file sorgente.
 #
-# .call(source_path, github:, rag:, test_helper:, rules:, mistral:)
+# .call(source_path, github:, mistral:)
 #   → Success({ path: String, content: String, usage: Hash })
 #   | Failure({ step: :test_writer, error: String })
 #
@@ -9,14 +9,19 @@
 #   → Success({ path: String, content: String, usage: Hash })
 #   | Failure({ step: :test_fix, error: String })
 #
+# .test_path_for(source_path) → String | nil
+#
 # source_path: path relativo al repo_root (es. "app/services/magic_link_service.rb")
 # github:      Calvin::GitHubClient
-# rag:         Calvin::SupabaseStore
-# test_helper: String — contenuto di test/test_helper.rb (precaricato da TestFlow)
-# rules:       String — rules RAG iniettate ultime (recency bias)
 # mistral:     Calvin::MistralClient
+#
+# Il contesto RAG (fixtures, test_helper, rules) viene recuperato interamente
+# via ContextRetriever.call_for_test(source_path) — similarity search su
+# calvin_context_search con source_types=['fixture','test_helper','rule'].
+# Nessun fetch deterministico per path, nessuna regex CamelCase.
 
 require "dry/monads"
+require_relative "context_retriever"
 
 module Calvin
   module TestWriter
@@ -39,14 +44,14 @@ module Calvin
       nil
     end
 
-    def call(source_path, github:, rag:, test_helper:, rules:, mistral:)
-      test_path    = test_path_for(source_path)
+    def call(source_path, github:, mistral:)
+      test_path = test_path_for(source_path)
       return Failure(step: :test_writer, error: "not a testable path: #{source_path}") unless test_path
 
-      source       = github.get_file_content(source_path).to_s
-      current_test = github.get_file_content(test_path).to_s
-      fixtures     = resolve_fixtures(source, source_path, rag)
-      example      = fetch_example(source_path, test_path, github)
+      source        = github.get_file_content(source_path).to_s
+      current_test  = github.get_file_content(test_path).to_s
+      retrieval     = ContextRetriever.call_for_test(source_path)
+      example       = fetch_example(source_path, test_path, github)
       system_prompt = load_system_prompt
 
       user_message = build_message(
@@ -54,10 +59,8 @@ module Calvin
         source:       source,
         test_path:    test_path,
         current_test: current_test,
-        fixtures:     fixtures,
-        test_helper:  test_helper,
-        example:      example,
-        rules:        rules
+        context:      retrieval.rules || "(none)",
+        example:      example
       )
 
       response = mistral.complete_messages(
@@ -115,35 +118,11 @@ module Calvin
         0.0
     end
 
-    # Estrae costanti CamelCase dal sorgente, le converte in fixture paths
-    # e fa un fetch deterministico dal RAG (nessun similarity search).
-    def resolve_fixtures(source, source_path, rag)
-      constants = source.scan(/\b[A-Z][A-Za-z]+\b/).uniq
-      fixture_paths = constants.map do |const|
-        snake  = const.gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
-                      .gsub(/([a-z\d])([A-Z])/, '\1_\2')
-                      .downcase
-        "fixture/#{snake}s.yml"
-      end.uniq
-
-      chunks = rag.fetch_by_source_paths(
-        repo:         Calvin::REPO,
-        source_paths: fixture_paths
-      )
-
-      return "(none)" if chunks.empty?
-
-      chunks.map { |c| "### #{c[:source_path]}\n#{c[:content]}" }.join("\n\n")
-    rescue => e
-      Calvin::LOG.warn "TestWriter: fixture fetch failed for #{source_path}: #{e.message}"
-      "(none)"
-    end
-
     # Cerca un file di test esistente dello stesso tipo come esempio di pattern.
     # Esclude il file che stiamo scrivendo.
     def fetch_example(source_path, test_path, github)
-      type     = source_path.split("/")[1]           # "services", "contracts", "jobs"
-      type_dir = "test/#{type}"
+      type       = source_path.split("/")[1]
+      type_dir   = "test/#{type}"
       candidates = github.list_directory(type_dir)
       example_name = candidates.find { |f| f.end_with?("_test.rb") && "#{type_dir}/#{f}" != test_path }
       return "(none)" unless example_name
@@ -153,8 +132,9 @@ module Calvin
       "(none)"
     end
 
-    def build_message(source_path:, source:, test_path:, current_test:, fixtures:,
-                      test_helper:, example:, rules:)
+    # context: output di retrieval.rules — mix di fixture, test_helper e rules
+    # ordinati per similarity, formattati da ContextRetriever#format_rules.
+    def build_message(source_path:, source:, test_path:, current_test:, context:, example:)
       <<~MSG
         SOURCE: #{source_path}
         #{source}
@@ -162,17 +142,11 @@ module Calvin
         TEST FILE: #{test_path}
         #{current_test.empty? ? '(empty — create from scratch)' : current_test}
 
-        FIXTURES:
-        #{fixtures}
-
-        TEST_HELPER:
-        #{test_helper}
+        CONTEXT (fixtures, test_helper, rules):
+        #{context}
 
         EXAMPLE:
         #{example}
-
-        RULES:
-        #{rules}
       MSG
     end
 
