@@ -1,19 +1,14 @@
 # frozen_string_literal: true
-# FixturesFetcher — legge test/fixtures/*.yml e test/test_helper.rb
+# FixturesFetcher — legge fixtures e test_helper.rb
 # dal repo target e produce un chunk per file pronto per l'embedding.
 #
-# source_type: "fixture"     → ogni file sotto test/fixtures/*.yml
-# source_type: "test_helper" → test/test_helper.rb (chunk singolo)
+# I path sono configurabili via config/calvin.yml:
+#   project:
+#     fixtures_dir:      backend/api/test/fixtures
+#     test_helper_path:  backend/api/test/test_helper.rb
 #
-# Ingestion::FixturesFetcher.from_repo("Malstrom/synca")
-# => [
-#   { source_type: "fixture",     source_path: "fixture/users.yml",       content: "..." },
-#   { source_type: "fixture",     source_path: "fixture/magic_links.yml", content: "..." },
-#   { source_type: "test_helper", source_path: "test_helper",             content: "..." },
-# ]
-#
-# Con changed_paths: reingesce solo i file presenti nella lista.
-# Con changed_paths: nil: reingesce tutto (ingest iniziale).
+# source_type: "fixture"     → ogni file sotto fixtures_dir/*.yml
+# source_type: "test_helper" → test_helper_path (chunk singolo)
 #
 # Idempotente: l'upsert in Supabase è su unique(repo, source_path).
 # Chunking: un chunk per file — le fixtures Rails sono già piccole.
@@ -23,18 +18,25 @@ require "base64"
 
 module Ingestion
   class FixturesFetcher
-    FIXTURES_DIR     = "test/fixtures"
-    TEST_HELPER_PATH = "test/test_helper.rb"
+    def self.fixtures_dir
+      Calvin::CONFIG.dig(:project, :fixtures_dir) || "test/fixtures"
+    end
+
+    def self.test_helper_path
+      Calvin::CONFIG.dig(:project, :test_helper_path) || "test/test_helper.rb"
+    end
 
     def self.from_repo(repo, ref: "main", changed_paths: nil)
       new(repo, ref: ref, changed_paths: changed_paths).fetch
     end
 
     def initialize(repo, ref: "main", changed_paths: nil)
-      @repo          = repo
-      @ref           = ref
-      @changed_paths = changed_paths
-      @client        = Octokit::Client.new(access_token: ENV.fetch("GITHUB_TOKEN"))
+      @repo             = repo
+      @ref              = ref
+      @changed_paths    = changed_paths
+      @fixtures_dir     = self.class.fixtures_dir
+      @test_helper_path = self.class.test_helper_path
+      @client           = Octokit::Client.new(access_token: ENV.fetch("GITHUB_TOKEN"))
     end
 
     def fetch
@@ -45,8 +47,6 @@ module Ingestion
     end
 
     private
-
-    # ── Fixtures ─────────────────────────────────────────────────────────────
 
     def fetch_fixtures
       all_paths = list_fixture_files
@@ -78,35 +78,31 @@ module Ingestion
     end
 
     def list_fixture_files
-      entries = @client.contents(@repo, path: FIXTURES_DIR, ref: @ref)
+      entries = @client.contents(@repo, path: @fixtures_dir, ref: @ref)
       entries
         .select { |e| e[:type] == "file" && e[:name].end_with?(".yml") }
         .map    { |e| e[:path] }
     rescue Octokit::NotFound
-      Calvin::LOG.warn "FixturesFetcher: #{FIXTURES_DIR} not found in #{@repo}"
+      Calvin::LOG.warn "FixturesFetcher: #{@fixtures_dir} not found in #{@repo}"
       []
     end
 
-    # ── Test helper ──────────────────────────────────────────────────────────
-
     def fetch_test_helper
-      if @changed_paths && !@changed_paths.include?(TEST_HELPER_PATH)
+      if @changed_paths && !@changed_paths.include?(@test_helper_path)
         Calvin::LOG.info "FixturesFetcher: test_helper.rb unchanged — skipping"
         return []
       end
 
-      content = fetch_file(TEST_HELPER_PATH)
+      content = fetch_file(@test_helper_path)
       return [] if content.nil?
 
-      Calvin::LOG.info "FixturesFetcher: fetched #{TEST_HELPER_PATH} (#{content.bytesize}B)"
+      Calvin::LOG.info "FixturesFetcher: fetched #{@test_helper_path} (#{content.bytesize}B)"
       [{
         source_type: "test_helper",
         source_path: "test_helper",
         content:     content
       }]
     end
-
-    # ── Helpers ──────────────────────────────────────────────────────────────
 
     def fetch_file(path)
       blob    = @client.contents(@repo, path: path, ref: @ref)
