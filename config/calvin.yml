@@ -59,13 +59,13 @@ rag:
   target_repo: Malstrom/synca
 
   # Fase 1 — explore: regole iniettate nel system prompt per orientare l'esplorazione.
-  top_k_explore: 20
+  top_k_explore: 1
 
   # Fase 2 — implement: regole iniettate nell'user message come ultima sezione (recency bias).
-  top_k_implement: 20
+  top_k_implement: 1
 
   # Fase 3 — test: fixtures + test_helper + rules per il file da testare.
-  top_k_test: 20
+  top_k_test: 1
 
   # Chunk generici — predisposto per source_type futuri (scenari, docs, contratti).
   top_k_context: 5
