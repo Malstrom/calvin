@@ -67,3 +67,4 @@ PR_BODY_END
 - Paths are relative to the application root — do not include the `backend/api/` prefix
 - Every FILE block contains the complete file, not a diff
 - Never add `validates` or `validate` calls to any model file
+- **Do not generate test files.** Never output FILE blocks for paths under `test/`. Tests are written by humans.

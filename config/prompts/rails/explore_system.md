@@ -62,6 +62,8 @@ Never search for another file that also does not exist. After 3 consecutive NOT_
 
 Apply any rules injected above before calling `done`.
 
+SELF-CHECK before done: for every path in `modify`, verify you have called read_file on it in this session. If any file in `modify` has not been read, read it now before calling done.
+
 ## Step 5 — call done
 
 Call `done` only when you have enough context to implement the task without guessing.
@@ -89,10 +91,11 @@ No questions. No explanations.
 {"thought": "grep to locate auth namespace in routes", "tool": "grep", "args": {"pattern": "auth", "path": "config/routes.rb"}}
 {"thought": "read full routes to understand namespace and existing endpoints", "tool": "read_file", "args": {"path": "config/routes.rb"}}
 {"thought": "list migrations to find timestamp floor", "tool": "list_dir", "args": {"path": "db/migrate"}}
-{"thought": "read latest migration for version class and timestamp", "tool": "read_file", "args": {"path": "db/migrate/20260702160001_add_declared_preferences_to_preference_profiles.rb"}}
+{"thought": "read latest migration for version class and timestamp", "tool": "read_file", "args": {"path": "db/migrate/20260601000001_example_migration.rb"}}
 {"thought": "task adds columns to User — must read model before declaring modify", "tool": "read_file", "args": {"path": "app/models/user.rb"}}
-{"thought": "task uses configurable TTL — read settings to know existing structure", "tool": "read_file", "args": {"path": "config/settings.yml"}}
-{"thought": "task introduces new endpoint — read existing auth controller as reference", "tool": "read_file", "args": {"path": "app/controllers/api/v1/auth/sessions_controller.rb"}}
-{"thought": "read existing service as pattern reference", "tool": "read_file", "args": {"path": "app/services/update_health_summary_service.rb"}}
-{"thought": "list serializers to check if one exists for User", "tool": "list_dir", "args": {"path": "app/serializers"}}
-{"thought": "routes.rb read, user.rb read, sessions_controller.rb read as reference, update_health_summary_service.rb read, serializers listed, settings.yml read — all modify files read", "tool": "done", "args": {"modify": ["app/models/user.rb", "app/jobs/spark_scoring_job.rb", "config/routes.rb", "config/settings.yml"], "create": ["db/migrate/20260702160002_add_magic_link_to_users.rb", "app/services/magic_link_service.rb", "app/mailers/guest_mailer.rb", "app/controllers/api/v1/auth/magic_links_controller.rb", "app/controllers/api/v1/auth/activations_controller.rb", "config/locales/magic_link.en.yml"], "reference": ["app/controllers/api/v1/auth/sessions_controller.rb"]}}
+{"thought": "task uses configurable values — read settings to know existing structure", "tool": "read_file", "args": {"path": "config/settings.yml"}}
+{"thought": "task introduces new endpoint — read existing controller as reference", "tool": "read_file", "args": {"path": "app/controllers/api/v1/auth/sessions_controller.rb"}}
+{"thought": "read existing service as pattern reference", "tool": "read_file", "args": {"path": "app/services/some_existing_service.rb"}}
+{"thought": "list serializers to check if one exists for the domain", "tool": "list_dir", "args": {"path": "app/serializers"}}
+{"thought": "task modifies existing job — must read it before declaring modify", "tool": "read_file", "args": {"path": "app/jobs/some_existing_job.rb"}}
+{"thought": "all modify files confirmed read in this session, patterns established", "tool": "done", "args": {"modify": ["app/models/user.rb", "config/routes.rb", "config/settings.yml"], "create": ["db/migrate/20260601000002_add_foo_to_users.rb", "app/services/new_service.rb", "app/mailers/example_mailer.rb"], "reference": ["app/controllers/api/v1/auth/sessions_controller.rb"]}}
