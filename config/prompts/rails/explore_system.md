@@ -34,6 +34,8 @@ Before calling `done`, if you plan to create or modify an endpoint:
 
 Controllers stay thin: they call services and render serializers. They do not contain business logic or ad‑hoc JSON hashes.
 
+**Every route entry requires a controller.** Before calling `done`, for every route you plan to add, verify that a controller file handling that action either already exists or is in your `create` list. A route without a controller is a deploy-breaking error.
+
 # Domain rules — jobs and services
 
 Every job (`app/jobs/*.rb`) is:
@@ -148,12 +150,16 @@ SELF-CHECK before done:
 - For every path in `modify`, verify you have called `read_file` on it in this session.
 - If the issue mentions endpoints:
   - confirm you have route, controller, service, contract, serializer in your plan.
+  - confirm that for every new route, the corresponding controller is in `modify` or `create`.
 - If the issue touches a job:
   - confirm the job delegates logic to a service and that idempotence/retry are considered.
 - If the issue touches DB or constants:
   - confirm you have a new migration, no new business logic in the model, and relevant values moved to `Settings.*`.
 - If the task introduces user-facing text:
   - confirm you have added/used I18n keys instead of inline strings.
+- If the task introduces a mailer:
+  - confirm you have read `app/mailers/application_mailer.rb` or an existing mailer to verify `default_url_options` / host configuration is handled. A mailer that calls `*_url` helpers without a configured host will raise at runtime.
+- Before `done`, list `test/` for the domains you touched (models, services, controllers) and read at least one existing test file per layer you will create or modify. Apply the same fixture and assertion patterns found there.
 
 ## Step 5 — call done
 
@@ -187,4 +193,7 @@ No questions. No explanations.
 {"thought": "read existing service as pattern reference", "tool": "read_file", "args": {"path": "app/services/some_existing_service.rb"}}
 {"thought": "list serializers to check if one exists for the domain", "tool": "list_dir", "args": {"path": "app/serializers"}}
 {"thought": "task modifies existing job — must read it before declaring modify", "tool": "read_file", "args": {"path": "app/jobs/some_existing_job.rb"}}
-{"thought": "all modify files confirmed read in this session, patterns established", "tool": "done", "args": {"modify": ["app/models/user.rb", "config/routes.rb", "config/settings.yml"], "create": ["db/migrate/20260601000002_add_foo_to_users.rb", "app/services/new_service.rb", "app/mailers/example_mailer.rb"], "reference": ["app/controllers/api/v1/auth/sessions_controller.rb"]}}
+{"thought": "task introduces mailer — read application_mailer.rb to verify host/url_helpers pattern", "tool": "read_file", "args": {"path": "app/mailers/application_mailer.rb"}}
+{"thought": "list test/controllers to find reference test for this namespace", "tool": "list_dir", "args": {"path": "test/controllers"}}
+{"thought": "read existing controller test as pattern for assertions and fixtures", "tool": "read_file", "args": {"path": "test/controllers/api/v1/auth/sessions_controller_test.rb"}}
+{"thought": "all modify files confirmed read, controller exists for every new route, mailer host verified, test patterns read", "tool": "done", "args": {"modify": ["app/models/user.rb", "config/routes.rb", "config/settings.yml"], "create": ["db/migrate/20260601000002_add_foo_to_users.rb", "app/services/new_service.rb", "app/mailers/example_mailer.rb"], "reference": ["app/controllers/api/v1/auth/sessions_controller.rb"]}}
