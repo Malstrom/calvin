@@ -31,12 +31,15 @@ module Calvin
         r = result.value!  # Calvin::FlowResult
 
         source_paths = Array(r.files).map { |f| f[:path] }
-        tf = TestFlow.call(
-          source_paths,
-          branch:  r.branch || "",
-          github:  github,
-          mistral: mistral
-        )
+        # TestFlow disabled — generated tests are not reliable yet.
+        # Re-enable when test generation quality improves.
+        # tf = TestFlow.call(
+        #   source_paths,
+        #   branch:  r.branch || "",
+        #   github:  github,
+        #   mistral: mistral
+        # )
+        tf = Dry::Monads::Failure(:disabled)
 
         if tf.success?
           stats     = tf.value!
