@@ -13,6 +13,84 @@ Collect enough context to:
 - Know the patterns used by each layer (controller, service, contract, serializer, routes, models, jobs)
 - Know the migration timestamp floor
 
+# Domain rules — API endpoints and layers
+
+For every new or modified endpoint mentioned in the issue:
+
+- There is always:
+  - a route entry in `config/routes.rb` under the correct namespace,
+  - a controller action where the HTTP request is handled,
+  - a service object where the business logic lives,
+  - a Dry::Validation contract for request validation,
+  - a serializer (Alba) for the response payload.
+
+Before calling `done`, if you plan to create or modify an endpoint:
+
+- You MUST have:
+  - read `config/routes.rb`,
+  - read at least one controller in the same namespace as a pattern,
+  - read at least one existing service object for the domain,
+  - listed `app/contracts` and `app/serializers` to check if contracts/serializers already exist.
+
+Controllers stay thin: they call services and render serializers. They do not contain business logic or ad‑hoc JSON hashes.
+
+# Domain rules — jobs and services
+
+Every job (`app/jobs/*.rb`) is:
+
+- idempotent: running it twice does not cause inconsistent state,
+- delegating business logic to a service object,
+- handling retry and the terminal failure after retries (logging, metrics, state update).
+
+If the issue touches a job:
+
+- You MUST read the job file before including it in `modify`,
+- You MUST read or create a corresponding service object that encapsulates the job logic.
+
+Jobs orchestrate. Services implement business rules.
+
+# Domain rules — migrations, models, settings
+
+Database changes:
+
+- Always go in a new migration with a timestamp higher than the latest migration.
+- Models are dumb data structures: no new business logic, no new validations except trivial uniqueness/presence that already match existing patterns.
+
+Configuration:
+
+- Any business constant (timeouts, TTLs, limits, hostnames, feature flags) must live in `config/settings.yml` via the `config` gem.
+- Do not hardcode magic numbers or strings (e.g. `72.hours`, `5.minutes`) in services, jobs or controllers. Use `Settings.*` instead.
+
+Before `done` when touching DB or constants:
+
+- list `db/migrate` to find the timestamp floor,
+- read the latest migration to copy the version pattern,
+- read the relevant model only to understand associations (do not add new business rules),
+- read `config/settings.yml` to follow the existing structure for `Settings.*`.
+
+# Domain rules — I18n
+
+Any string that can be read by an end user:
+
+- must come from I18n, never be inlined in Ruby or ERB.
+
+This includes:
+
+- mailer subjects and body text,
+- error and success messages returned by services,
+- messages rendered by controllers or serializers.
+
+When you need a user-facing message:
+
+- add keys under `config/locales/*.yml` following the existing namespace structure,
+- use `I18n.t(...)` in Ruby code,
+- do not introduce new strings outside I18n.
+
+Before `done`, if the task introduces new user-facing text, you MUST have:
+
+- read the relevant locale file (e.g. `config/locales/*.yml`),
+- listed `config/locales` to understand naming conventions.
+
 # Tools
 
 - `read_file` → {"path": "app/services/foo.rb"}
@@ -48,7 +126,10 @@ but you still need enough route context to understand how the endpoint fits the 
 
 ## Step 2 — read one reference per layer you will touch
 
-Before calling `done`, for every file type you plan to create or modify, read one existing file of the same type:
+Before calling `done`, for every file type you plan to create or modify (routes, controllers, services, contracts, serializers, jobs, migrations, settings, locales):
+
+- read at least one existing file of the same type as a reference,
+- apply the Domain rules above to identify which layers must exist together for the task.
 
 READ BEFORE MODIFY: if you plan to produce a FILE block for an existing file, you must have read it. No exceptions.
 
@@ -62,7 +143,17 @@ Never search for another file that also does not exist. After 3 consecutive NOT_
 
 Apply any rules injected above before calling `done`.
 
-SELF-CHECK before done: for every path in `modify`, verify you have called read_file on it in this session. If any file in `modify` has not been read, read it now before calling done.
+SELF-CHECK before done:
+
+- For every path in `modify`, verify you have called `read_file` on it in this session.
+- If the issue mentions endpoints:
+  - confirm you have route, controller, service, contract, serializer in your plan.
+- If the issue touches a job:
+  - confirm the job delegates logic to a service and that idempotence/retry are considered.
+- If the issue touches DB or constants:
+  - confirm you have a new migration, no new business logic in the model, and relevant values moved to `Settings.*`.
+- If the task introduces user-facing text:
+  - confirm you have added/used I18n keys instead of inline strings.
 
 ## Step 5 — call done
 
@@ -70,13 +161,11 @@ Call `done` only when you have enough context to implement the task without gues
 
 `done` requires a structured argument declaring your file plan:
 
-```
 {"thought": "...", "tool": "done", "args": {
   "modify":    ["path/to/existing_file.rb"],
   "create":    ["path/to/new_file.rb"],
   "reference": ["path/to/pattern_file.rb"]
 }}
-```
 
 - **modify**: files that already exist and will receive surgical changes — you MUST have read every file in this list
 - **create**: files that do not exist yet and will be generated from scratch
