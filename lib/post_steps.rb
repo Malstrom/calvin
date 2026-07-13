@@ -2,9 +2,10 @@
 # Calvin::PostSteps — step uniformi eseguiti dopo ogni flow.
 #
 # Responsabilità:
-#   1. RubocopAutocorrect sui file prodotti dal flow (solo su successo)
-#   2. RunReporter.write — log CSV/MD nel repo target
-#   3. post_status sull'issue in caso di failure (se issue disponibile)
+#   1. TestFlow sui file prodotti dal flow (solo su successo, prima di rubocop)
+#   2. RubocopAutocorrect sui file prodotti dal flow (solo su successo)
+#   3. RunReporter.write — log CSV/MD nel repo target
+#   4. post_status sull'issue in caso di failure (se issue disponibile)
 #
 # Compatibile con qualsiasi flow che restituisce Calvin::FlowResult.
 # I campi opzionali (explore_turns, test_pass_pct, ecc.) vengono letti
@@ -14,16 +15,22 @@
 #   Calvin::PostSteps.run(
 #     result,
 #     github:   github,
+#     mistral:  mistral,
 #     workflow: "calvin",
 #     ref:      issue.number,
 #     issue:    issue          # opzionale — usato per post_status su failure
 #   )
 
+require_relative "test_flow"
+
 module Calvin
   module PostSteps
-    def self.run(result, github:, workflow:, ref:, issue: nil)
+    def self.run(result, github:, mistral:, workflow:, ref:, issue: nil)
       if result.success?
         r = result.value!  # Calvin::FlowResult
+
+        source_paths = Array(r.files).map { |f| f[:path] }
+        TestFlow.call(source_paths, github: github, mistral: mistral)
 
         Calvin::RubocopAutocorrect.run(
           files:  r.files  || [],
