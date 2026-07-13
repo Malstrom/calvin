@@ -12,7 +12,7 @@
 
 require_relative "../lib/boot"
 
-# ── Issue context ────────────────────────────────────────────────────────────────────────
+# ── Issue context ──────────────────────────────────────────────────────────────────────────────────
 temp_github = Calvin::GitHubClient.new
 
 issue  = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
@@ -22,7 +22,8 @@ repo_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last 
 Calvin::LOG.info "labels: #{labels.join(', ')}"
 Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
 
-github = Calvin::GitHubClient.new(repo_root: repo_root)
+github  = Calvin::GitHubClient.new(repo_root: repo_root)
+mistral = Calvin::MistralClient.new
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
 
 mode = Calvin::ModeRouter.for_labels(labels)
@@ -35,6 +36,7 @@ in :explore_issue
   Calvin::PostSteps.run(
     result,
     github:   github,
+    mistral:  mistral,
     workflow: "calvin",
     ref:      issue.number,
     issue:    issue
