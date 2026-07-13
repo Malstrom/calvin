@@ -2,7 +2,7 @@
 # TestFlow — scrive i file di test per tutti i path testabili di un file_plan.
 #
 # .call(source_paths, github:, mistral:)
-#   => Success({ tests_written: [{ path:, content:, usage: }] })
+#   => Success({ tests_written: Integer, writer_errors: Integer, tests_skipped: Integer, written: [...] })
 #    | Failure({ step: :test_flow, error: String })
 #
 # source_paths: Array di path (output del file_plan di implement)
@@ -24,11 +24,13 @@ module Calvin
     extend self
 
     def call(source_paths, github:, mistral:)
-      testable = Array(source_paths).select { |p| TestWriter.test_path_for(p) }
+      all       = Array(source_paths)
+      testable  = all.select { |p| TestWriter.test_path_for(p) }
+      skipped   = all.size - testable.size
 
       if testable.empty?
         Calvin::LOG.info "TestFlow: nessun path testabile trovato — skip"
-        return Success(tests_written: [])
+        return Success(tests_written: 0, writer_errors: 0, tests_skipped: skipped, written: [])
       end
 
       Calvin::LOG.info "TestFlow: #{testable.size} path testabili: #{testable.inspect}"
@@ -47,7 +49,14 @@ module Calvin
         test
       end
 
-      Success(tests_written: written)
+      errors = testable.size - written.size
+
+      Success(
+        tests_written: written.size,
+        writer_errors: errors,
+        tests_skipped: skipped,
+        written:       written
+      )
     rescue => e
       Failure(step: :test_flow, error: e.message)
     end
