@@ -31,7 +31,12 @@ module Calvin
         r = result.value!  # Calvin::FlowResult
 
         source_paths = Array(r.files).map { |f| f[:path] }
-        tf = TestFlow.call(source_paths, github: github, mistral: mistral)
+        tf = TestFlow.call(
+          source_paths,
+          branch:  r.branch || "",
+          github:  github,
+          mistral: mistral
+        )
 
         if tf.success?
           stats     = tf.value!

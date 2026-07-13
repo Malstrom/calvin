@@ -1,17 +1,19 @@
 # frozen_string_literal: true
 # TestFlow — scrive i file di test per tutti i path testabili di un file_plan.
 #
-# .call(source_paths, github:, mistral:)
+# .call(source_paths, branch:, github:, mistral:)
 #   => Success({ tests_written: Integer, writer_errors: Integer, tests_skipped: Integer, written: [...] })
 #    | Failure({ step: :test_flow, error: String })
 #
 # source_paths: Array di path (output del file_plan di implement)
+# branch:       nome del branch su cui committare i test (da FlowResult#branch)
 # github:       Calvin::GitHubClient
 # mistral:      Calvin::MistralClient
 #
 # Per ogni path testabile:
 #   1. TestWriter.call  — genera il contenuto via LLM + ContextRetriever
-#   2. github.write_file — committa il file sul branch
+# Tutti i file generati vengono committati in un unico commit atomico via
+# github.commit_files_atomically.
 #
 # I path non testabili (fuori da TESTABLE_DIRS) vengono silenziosamente ignorati.
 
@@ -23,10 +25,10 @@ module Calvin
     include Dry::Monads[:result]
     extend self
 
-    def call(source_paths, github:, mistral:)
-      all       = Array(source_paths)
-      testable  = all.select { |p| TestWriter.test_path_for(p) }
-      skipped   = all.size - testable.size
+    def call(source_paths, branch:, github:, mistral:)
+      all      = Array(source_paths)
+      testable = all.select { |p| TestWriter.test_path_for(p) }
+      skipped  = all.size - testable.size
 
       if testable.empty?
         Calvin::LOG.info "TestFlow: nessun path testabile trovato — skip"
@@ -35,25 +37,45 @@ module Calvin
 
       Calvin::LOG.info "TestFlow: #{testable.size} path testabili: #{testable.inspect}"
 
-      written = testable.filter_map do |source_path|
+      writer_errors = 0
+      files_to_commit = []
+
+      testable.each do |source_path|
         result = TestWriter.call(source_path, github: github, mistral: mistral)
 
         if result.failure?
           Calvin::LOG.warn "TestFlow: TestWriter fallito per #{source_path} — #{result.failure[:error]}"
+          writer_errors += 1
           next
         end
 
         test = result.value!
-        github.write_file(test[:path], test[:content])
-        Calvin::LOG.info "TestFlow: scritto #{test[:path]} (usage=#{test[:usage].inspect})"
-        test
+        Calvin::LOG.info "TestFlow: generato #{test[:path]} (usage=#{test[:usage].inspect})"
+        files_to_commit << { path: test[:path], content: test[:content] }
       end
 
-      errors = testable.size - written.size
+      if files_to_commit.any?
+        begin
+          github.commit_files_atomically(
+            files_to_commit,
+            message: "test: add generated test files [calvin]",
+            branch:  branch
+          )
+          files_to_commit.each do |f|
+            Calvin::LOG.info "TestFlow: scritto #{f[:path]}"
+          end
+        rescue => e
+          Calvin::LOG.error "TestFlow: commit_files_atomically fallito — #{e.message}"
+          writer_errors += files_to_commit.size
+          files_to_commit = []
+        end
+      end
+
+      written = files_to_commit
 
       Success(
         tests_written: written.size,
-        writer_errors: errors,
+        writer_errors: writer_errors,
         tests_skipped: skipped,
         written:       written
       )
