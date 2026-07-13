@@ -84,6 +84,11 @@ module Calvin
     def parse_files(issue:, stack:, github:, content:, usage:, usage_explore:, temperature:, explore_turns:, retrieval_explore:, retrieval_implement:)
       files   = FileParser.parse(content)
       pr_body = FileParser.parse_pr_body(content)
+
+      # Test generation disabled — Calvin does not yet write reliable tests.
+      # Remove this line to re-enable once test quality is validated.
+      files = files.reject { |f| f[:path].start_with?("test/") }
+
       Calvin::LOG.info "parsed #{files.size} file(s)  →  #{files.map { |f| f[:path] }.join(', ')}"
       Success(
         issue:                issue,
