@@ -1,10 +1,16 @@
 # frozen_string_literal: true
-# SupabaseStore — upsert, delete e similarity search chunk su Supabase via REST API.
+# SupabaseStore — upsert, delete, similarity search e fetch diretto
+# di chunk su Supabase via REST API.
 #
 # Ingestion::SupabaseStore.new.upsert(repo:, source_type:, source_path:, content:, embedding:)
 # Ingestion::SupabaseStore.new.delete_by_source_path(repo:, source_path:)
 # Ingestion::SupabaseStore.new.similar_to(embedding, repo:, threshold: 0.92, limit: 1)
 # => [{ "source_path" => "rule/38/2", "content" => "...", "similarity" => 0.9431 }]
+#
+# Ingestion::SupabaseStore.new.fetch_by_source_paths(repo:, source_paths:)
+# => [{ source_path: "fixture/users.yml", content: "..." }]
+# Fetch diretto per lista di source_path — usato da TestFlow per caricare
+# test_helper e fixtures pertinenti senza similarity search.
 #
 # Usa l'header "Prefer: resolution=merge-duplicates" per fare upsert automatico
 # sul constraint unique(repo, source_path) — idempotente.
@@ -52,7 +58,6 @@ module Ingestion
     end
 
     # Elimina tutti i chunk con il dato source_path nel repo.
-    # Usato dalla strategia replace: rimuove il vecchio chunk prima di inserire il nuovo.
     def delete_by_source_path(repo:, source_path:)
       uri  = URI("#{@url}/rest/v1/calvin_chunks?repo=eq.#{URI.encode_uri_component(repo)}&source_path=eq.#{URI.encode_uri_component(source_path)}")
       http = build_http(uri)
@@ -69,7 +74,6 @@ module Ingestion
 
     # Cerca chunk semanticamente simili a embedding.
     # Usa la RPC calvin_rules_search definita nel DB Supabase.
-    # Ritorna array di hash con source_path, content, similarity.
     def similar_to(embedding, repo:, threshold: 0.92, limit: 1)
       uri  = URI("#{@url}/rest/v1/rpc/calvin_rules_search")
       http = build_http(uri)
@@ -89,6 +93,35 @@ module Ingestion
 
       results = JSON.parse(body)
       results.select { |r| r["similarity"].to_f >= threshold }
+    end
+
+    # Fetch diretto per lista di source_path — nessun similarity search.
+    # Usato da TestFlow per caricare test_helper e fixtures pertinenti per ogni file.
+    #
+    # fetch_by_source_paths(repo: "Malstrom/synca", source_paths: ["test_helper", "fixture/users.yml"])
+    # => [{ source_path: "test_helper", content: "..." }, { source_path: "fixture/users.yml", content: "..." }]
+    #
+    # Ritorna [] se source_paths è vuoto o nessun chunk trovato.
+    def fetch_by_source_paths(repo:, source_paths:)
+      return [] if source_paths.nil? || source_paths.empty?
+
+      encoded_repo  = URI.encode_uri_component(repo)
+      encoded_paths = source_paths.map { |p| URI.encode_uri_component(p) }.join(",")
+
+      uri  = URI("#{@url}/rest/v1/calvin_chunks?repo=eq.#{encoded_repo}&source_path=in.(#{encoded_paths})&select=source_path,content")
+      http = build_http(uri)
+
+      req = Net::HTTP::Get.new(uri)
+      set_headers(req)
+      req["Accept"] = "application/json"
+
+      resp = http.request(req)
+      body = resp.body.to_s.dup.force_encoding("UTF-8")
+      raise "Supabase fetch error: #{resp.code} #{body}" unless resp.is_a?(Net::HTTPSuccess)
+
+      JSON.parse(body).map do |row|
+        { source_path: row["source_path"], content: row["content"] }
+      end
     end
 
     private

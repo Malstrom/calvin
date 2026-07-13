@@ -1,0 +1,71 @@
+name: Calvin ingest fixtures
+
+# Triggered da synca su push a main quando cambiano fixtures o test_helper.
+# Chiamato via workflow_call dal workflow trigger in Malstrom/synca.
+#
+# Inputs:
+#   target_repo   — full repo name (e.g. Malstrom/synca)
+#   changed_paths — JSON array di path modificati (e.g. '["test/fixtures/users.yml"]')
+#                   Se vuoto o omesso, reingesce tutti i file (--all)
+
+on:
+  workflow_call:
+    inputs:
+      target_repo:
+        required: true
+        type: string
+      changed_paths:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      SYNCA_TOKEN:
+        required: true
+      MISTRAL_API_KEY:
+        required: true
+      SUPABASE_URL:
+        required: true
+      SUPABASE_SERVICE_KEY:
+        required: true
+
+jobs:
+  ingest-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout calvin
+        uses: actions/checkout@v4
+        with:
+          repository: Malstrom/calvin
+          token: ${{ secrets.SYNCA_TOKEN }}
+          path: calvin
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install Ruby dependencies
+        run: bundle install
+        working-directory: calvin/bin
+
+      - name: Build CLI argument
+        id: cli_arg
+        run: |
+          if [ -z "${{ inputs.changed_paths }}" ]; then
+            echo "arg=--all" >> $GITHUB_OUTPUT
+          else
+            # Converte JSON array ["a","b"] in CSV "a,b" per --changed
+            PATHS=$(echo '${{ inputs.changed_paths }}' | ruby -rjson -e 'puts JSON.parse(STDIN.read).join(",")')
+            echo "arg=--changed ${PATHS}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Calvin ingest fixtures
+        run: |
+          bundle exec ruby $GITHUB_WORKSPACE/calvin/bin/ingest_fixtures.rb \
+            --repo ${{ inputs.target_repo }} \
+            ${{ steps.cli_arg.outputs.arg }}
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/calvin/bin/Gemfile
+          GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

@@ -15,6 +15,8 @@
 #     usage_explore: result[:usage_explore],
 #     status:        :success,
 #     explore_turns: result[:explore_turns],
+#     tests_written: result[:tests_written],
+#     writer_errors: result[:writer_errors],
 #     temperature:   result[:temperature],
 #     files_written: result[:files_written],
 #     issue_length:  issue.body.to_s.length
@@ -32,7 +34,8 @@ module Calvin
     CSV_HEADER = %w[
       run_at workflow ref model
       prompt_tokens cached_tokens_explore completion_tokens total_tokens
-      cost_usd status explore_turns test_pass_pct
+      cost_usd status explore_turns
+      tests_written writer_errors
       temperature files_written issue_length
     ].freeze
 
@@ -53,7 +56,8 @@ module Calvin
       status:,
       usage_explore:  nil,
       explore_turns:  nil,
-      test_pass_pct:  nil,
+      tests_written:  nil,
+      writer_errors:  nil,
       temperature:    nil,
       files_written:  nil,
       issue_length:   nil
@@ -77,7 +81,8 @@ module Calvin
         cost_usd.to_s,
         status.to_s,
         explore_turns.nil? ? nil : explore_turns.to_s,
-        test_pass_pct.nil? ? nil : test_pass_pct.to_s,
+        tests_written.nil? ? nil : tests_written.to_s,
+        writer_errors.nil? ? nil : writer_errors.to_s,
         temperature.nil?   ? nil : temperature.to_s,
         files_written.nil? ? nil : files_written.to_s,
         issue_length.nil?  ? nil : issue_length.to_s
