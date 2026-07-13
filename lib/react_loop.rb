@@ -12,11 +12,12 @@
 #          top_k: rag.top_k_explore (default 10)
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
-#     system: config/prompts/{stack}/implement_system.md (invariato)
-#     user:   ## Task + observations categorizzate + ## Rules (RAG) ULTIME
-#     Rules RAG iniettate come ULTIMA sezione del messaggio utente per
-#     sfruttare il recency bias di Codestral: le sezioni che arrivano per
-#     ultime pesano di più durante la generazione.
+#     system[0]: config/prompts/{stack}/implement_system.md (formato/output)
+#     system[1]: ## Rules (RAG chunks) — secondo system message dedicato.
+#                Più autorità del user message. Usato se chunks disponibili.
+#     user:      ## Task + observations categorizzate (senza ## Rules)
+#     Usa retrieval_implement (query dai path) se disponibile, altrimenti
+#     fallback su retrieval_explore (query dall'issue).
 #     temperature: sampling.temperature.implement (default 0.0)
 #     RAG: Calvin::ContextRetriever.call_for_implement(file_plan) — query dai path file
 #          top_k: rag.top_k_implement (default 20)
@@ -54,19 +55,11 @@ module Calvin
       @issue_prompt = issue_prompt
       @stack        = stack
 
-      # Cache key stabile per tutta la fase explore di questo run.
-      # Attiva il prefix caching Mistral sul prefisso condiviso (system + issue + rules).
-      # Formato: "calvin-{issue_number}-{run_id}" — univoco per run, stabile tra i turni.
       run_id       = Process.pid
       issue_ref    = issue_number || "unknown"
       @explore_cache_key = "calvin-#{issue_ref}-#{run_id}"
 
-      # retrieval_explore: regole orientamento, query da title+body (top_k_explore)
-      # Passato dall'esterno da ExploreFlow prima che il loop parta.
       @retrieval_explore = retrieval || RetrievalResult.new(rules: nil, context: nil, chunks: [])
-
-      # retrieval_implement: regole codegen, query dai path del file_plan (top_k_implement)
-      # Popolato internamente subito dopo done() — quando il file_plan è noto.
       @retrieval_implement = RetrievalResult.new(rules: nil, context: nil, chunks: [])
 
       @mistral      = MistralClient.new
@@ -75,8 +68,6 @@ module Calvin
       @json_failures    = 0
       @not_found_streak = 0
 
-      # Accumula usage di tutti i turn explore per il breakdown nel PR body.
-      # cached_tokens: somma dei token serviti dalla cache Mistral (fatturati al 10%).
       @usage_explore = {
         "prompt_tokens"     => 0,
         "completion_tokens" => 0,
@@ -91,9 +82,6 @@ module Calvin
       setup_messages
     end
 
-    # Ritorna { content: String, turns: Integer, usage: Hash | nil,
-    #           usage_explore: Hash, temperature: Float,
-    #           retrieval_explore: RetrievalResult, retrieval_implement: RetrievalResult }
     def run
       Calvin::LOG.info "ReActLoop: explore cache_key=#{@explore_cache_key}"
 
@@ -129,8 +117,7 @@ module Calvin
     # Prompt assembly
     # ---------------------------------------------------------------------------
 
-    # Phase 1: rules injected just before # Examples (bottom of prompt) so that
-    # recency bias keeps them salient during the exploration loop.
+    # Fase 1: rules iniettate appena prima di # Examples nel system prompt explore.
     def build_explore_system
       base = load_prompt("explore_system.md")
       return base unless @retrieval_explore.rules
@@ -144,8 +131,6 @@ module Calvin
       end
     end
 
-    # Phase 2: system prompt is clean — rules go into the user message as the
-    # LAST section so recency bias makes Codestral apply them during generation.
     def build_implement_system
       load_prompt("implement_system.md")
     end
@@ -182,9 +167,6 @@ module Calvin
         }
         Calvin::LOG.info "done() plan — modify=#{@file_plan[:modify]} create=#{@file_plan[:create]} reference=#{@file_plan[:reference]}"
 
-        # Secondo retrieval RAG: query costruita dai path del file_plan.
-        # Fatto qui — dopo done(), prima di implement_phase — così la query
-        # riflette esattamente i file che verranno generati o modificati.
         @retrieval_implement = Calvin::ContextRetriever.call_for_implement(@file_plan)
         Calvin::LOG.info "retrieval_implement: #{@retrieval_implement.rules&.bytesize || 0} bytes, #{@retrieval_implement.chunks.size} chunks"
 
@@ -205,12 +187,9 @@ module Calvin
     end
 
     def call_model
-      # cache_key passato solo durante explore (multi-turn) — attiva prefix caching Mistral.
       resp = @mistral.complete_messages(@messages, temperature: @temp_explore,
                                                    cache_key: @explore_cache_key)
 
-      # Accumula usage explore per il breakdown nel PR body.
-      # cached_tokens viene da usage.prompt_tokens_details.cached_tokens (Mistral API).
       if resp[:usage]
         @usage_explore["prompt_tokens"]     += resp[:usage]["prompt_tokens"].to_i
         @usage_explore["completion_tokens"] += resp[:usage]["completion_tokens"].to_i
@@ -248,7 +227,7 @@ module Calvin
     end
 
     # ---------------------------------------------------------------------------
-    # verify_observations — forza lettura dei file :modify non ancora in observations
+    # verify_observations
     # ---------------------------------------------------------------------------
 
     def verify_observations
@@ -275,18 +254,8 @@ module Calvin
       Calvin::LOG.info "implement_phase after #{turns} explore turn(s) (temp=#{@temp_implement})"
       Calvin::LOG.info "usage_explore: prompt=#{@usage_explore['prompt_tokens']} cached=#{@usage_explore['cached_tokens']} completion=#{@usage_explore['completion_tokens']} total=#{@usage_explore['total_tokens']} across #{turns} turn(s)"
 
-      implement_system = build_implement_system
-      Calvin::LOG.info "context[implement_system]: #{implement_system[0..19].inspect}"
-
-      implement_user = build_implement_user
-      Calvin::LOG.info "context[implement_user]:   #{implement_user[0..19].inspect}"
-
-      # Implement è una singola chiamata — nessun cache_key (prefix caching non ha beneficio).
       response = @mistral.complete_messages(
-        [
-          { role: "system", content: implement_system },
-          { role: "user",   content: implement_user }
-        ],
+        build_implement_messages,
         temperature: @temp_implement
       )
 
@@ -301,6 +270,55 @@ module Calvin
       }
     end
 
+    # Costruisce l'array messages completo per la fase implement.
+    #
+    # Layout:
+    #   messages[0] role:system  — implement_system.md (formato/output istruzioni)
+    #   messages[1] role:system  — ## Rules + chunks RAG (solo se presenti)
+    #                              Secondo system message: più autorità del user message.
+    #                              Codestral pesa i messaggi system sopra quelli user.
+    #   messages[-1] role:user   — ## Task + file observations (senza ## Rules)
+    #
+    # Usa retrieval_implement se disponibile, altrimenti fallback su retrieval_explore.
+    def build_implement_messages
+      messages = []
+      messages << { role: "system", content: build_implement_system }
+
+      active_retrieval = @retrieval_implement.chunks.any? ? @retrieval_implement : @retrieval_explore
+      chunks = active_retrieval.chunks
+
+      if chunks.any?
+        source = @retrieval_implement.chunks.any? ? "implement" : "explore (fallback)"
+        rules_content = format_chunks_as_rules(chunks)
+        messages << { role: "system", content: rules_content }
+        Calvin::LOG.info "context[rules/#{source}]: #{chunks.size} chunks → second system message (#{rules_content.bytesize} bytes)"
+      else
+        Calvin::LOG.info "context[rules]: no chunks available — skipping second system message"
+      end
+
+      messages << { role: "user", content: build_implement_user }
+      messages
+    end
+
+    # Formatta i chunk RAG come secondo system message.
+    # Ogni chunk mostra source_path, source_type e similarity per dare al modello
+    # il contesto su cosa sta leggendo e quanto è rilevante.
+    def format_chunks_as_rules(chunks)
+      header = "## Architectural rules and project conventions\n" \
+               "Apply ALL of the following without exception. " \
+               "These override any general coding instincts."
+
+      body = chunks.map.with_index(1) do |c, i|
+        sim      = c["similarity"].to_f.round(3)
+        src_type = c["source_type"] || "rule"
+        path     = c["source_path"] || "unknown"
+        "### #{i}. #{path} [#{src_type}, relevance=#{sim}]\n#{c['content']}"
+      end.join("\n\n")
+
+      "#{header}\n\n#{body}"
+    end
+
+    # Costruisce il messaggio user per la fase implement (senza ## Rules).
     def build_implement_user
       sections = ["## Task", @issue_prompt]
 
@@ -333,17 +351,6 @@ module Calvin
       elsif @observations.any?
         lines = @observations.map { |o| "#{o[:label]}:\n#{o[:content].force_encoding('UTF-8')}" }.join("\n\n---\n\n")
         sections << "## Context gathered during exploration\n\n#{lines}"
-      end
-
-      # Rules iniettate ULTIME — recency bias: Codestral pesa di più le sezioni finali.
-      # Usa retrieval_implement (query dai path) se disponibile, altrimenti fallback
-      # su retrieval_explore (query dall'issue) per garantire sempre una copertura.
-      active_rules = @retrieval_implement.rules || @retrieval_explore.rules
-      if active_rules
-        source = @retrieval_implement.rules ? "implement" : "explore (fallback)"
-        sections << "## Rules — apply all of these without exception"
-        sections << active_rules
-        Calvin::LOG.info "context[rules/#{source}]: #{active_rules.bytesize} bytes injected LAST into user message"
       end
 
       sections.compact.reject(&:empty?).join("\n\n")
