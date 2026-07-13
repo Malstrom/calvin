@@ -59,7 +59,7 @@ module Calvin
       issue_ref    = issue_number || "unknown"
       @explore_cache_key = "calvin-#{issue_ref}-#{run_id}"
 
-      @retrieval_explore = retrieval || RetrievalResult.new(rules: nil, context: nil, chunks: [])
+      @retrieval_explore   = retrieval || RetrievalResult.new(rules: nil, context: nil, chunks: [])
       @retrieval_implement = RetrievalResult.new(rules: nil, context: nil, chunks: [])
 
       @mistral      = MistralClient.new
@@ -83,7 +83,8 @@ module Calvin
     end
 
     def run
-      Calvin::LOG.info "ReActLoop: explore cache_key=#{@explore_cache_key}"
+      Calvin.banner("EXPLORE", emoji: "🔍")
+      Calvin::LOG.info "cache_key=#{@explore_cache_key}  stack=#{@stack}  temp=#{@temp_explore}"
 
       MAX_TURNS.times do |i|
         n      = i + 1
@@ -95,7 +96,7 @@ module Calvin
         break if result == :abort
       end
 
-      Calvin::LOG.warn "ReAct MAX_TURNS (#{MAX_TURNS}) reached — forcing implement"
+      Calvin::LOG.warn "MAX_TURNS (#{MAX_TURNS}) reached — forcing implement"
       verify_observations
       implement_phase(MAX_TURNS)
     end
@@ -104,9 +105,7 @@ module Calvin
 
     def setup_messages
       explore_system = build_explore_system
-      Calvin::LOG.info "context[explore_system]: #{explore_system[0..19].inspect}"
-      Calvin::LOG.info "context[issue_prompt]:   #{@issue_prompt[0..19].inspect}"
-
+      Calvin::LOG.info "explore_system  #{(explore_system.bytesize / 1024.0).round(1)} KB"
       @messages = [
         { role: "system", content: explore_system },
         { role: "user",   content: @issue_prompt }
@@ -117,7 +116,6 @@ module Calvin
     # Prompt assembly
     # ---------------------------------------------------------------------------
 
-    # Fase 1: rules iniettate appena prima di # Examples nel system prompt explore.
     def build_explore_system
       base = load_prompt("explore_system.md")
       return base unless @retrieval_explore.rules
@@ -138,10 +136,10 @@ module Calvin
     def load_prompt(filename)
       path    = File.join(PROMPTS_DIR, @stack, filename)
       content = File.read(path, encoding: "UTF-8")
-      Calvin::LOG.info "ReActLoop: loaded #{filename} for stack=#{@stack} (#{content.bytesize} bytes)"
+      Calvin::LOG.info "loaded  #{@stack}/#{filename}  #{(content.bytesize / 1024.0).round(1)} KB"
       content
     rescue Errno::ENOENT
-      Calvin::LOG.warn "ReActLoop: #{filename} not found for stack=#{@stack}, using rails fallback"
+      Calvin::LOG.warn "#{filename} not found for stack=#{@stack}, using rails fallback"
       File.read(File.join(PROMPTS_DIR, "rails", filename), encoding: "UTF-8")
     end
 
@@ -150,14 +148,17 @@ module Calvin
     # ---------------------------------------------------------------------------
 
     def process_turn(n)
-      raw    = call_model
+      raw    = call_model(n)
       action = parse_action(raw)
 
       return handle_json_failure(n) if action.nil?
 
       @json_failures = 0
-      tool = action["tool"]
-      args = action["args"] || {}
+      tool    = action["tool"]
+      args    = action["args"] || {}
+      thought = action["thought"]
+
+      Calvin.tool_call(n, tool, args, thought: thought)
 
       if tool == "done"
         @file_plan = {
@@ -165,19 +166,22 @@ module Calvin
           create:    Array(args["create"]).map(&:strip),
           reference: Array(args["reference"]).map(&:strip)
         }
-        Calvin::LOG.info "done() plan — modify=#{@file_plan[:modify]} create=#{@file_plan[:create]} reference=#{@file_plan[:reference]}"
+        Calvin::LOG.info "done()  modify=#{@file_plan[:modify]}  create=#{@file_plan[:create]}  reference=#{@file_plan[:reference]}"
 
         @retrieval_implement = Calvin::ContextRetriever.call_for_implement(@file_plan)
-        Calvin::LOG.info "retrieval_implement: #{@retrieval_implement.rules&.bytesize || 0} bytes, #{@retrieval_implement.chunks.size} chunks"
+        Calvin::LOG.info "rag_implement  #{@retrieval_implement.rules&.bytesize || 0} bytes  #{@retrieval_implement.chunks.size} chunks"
 
         return :done
       end
 
       observation = dispatch_tool(tool, args)
-      Calvin::LOG.info "observation (#{tool}): #{observation[0..80]}"
 
       if tool == "read_file" && !observation.start_with?("ERROR:")
-        Calvin::LOG.info "context[#{args['path']}]: #{observation[0..19].inspect}"
+        Calvin.file_read(args["path"].to_s, observation.bytesize)
+      elsif observation.start_with?("ERROR:")
+        Calvin::LOG.warn "  #{observation[0..120]}"
+      else
+        Calvin::LOG.info "  └ #{observation[0..100].gsub(/\n/, ' ')}"
       end
 
       record_observation(tool, args, observation)
@@ -186,7 +190,7 @@ module Calvin
       handle_not_found(observation, n)
     end
 
-    def call_model
+    def call_model(n)
       resp = @mistral.complete_messages(@messages, temperature: @temp_explore,
                                                    cache_key: @explore_cache_key)
 
@@ -195,11 +199,14 @@ module Calvin
         @usage_explore["completion_tokens"] += resp[:usage]["completion_tokens"].to_i
         @usage_explore["total_tokens"]      += resp[:usage]["total_tokens"].to_i
         @usage_explore["cached_tokens"]     += resp[:usage].dig("prompt_tokens_details", "cached_tokens").to_i
+
+        pt = resp[:usage]["prompt_tokens"].to_i
+        ct = resp[:usage]["completion_tokens"].to_i
+        ca = resp[:usage].dig("prompt_tokens_details", "cached_tokens").to_i
+        Calvin::LOG.info "  #{Color::DIM}tokens  in=#{pt} cached=#{ca} out=#{ct}#{Color::RESET}"
       end
 
-      raw = resp[:content]
-      Calvin::LOG.info "ReAct turn (temp=#{@temp_explore}): #{raw[0..120]}"
-      raw
+      resp[:content]
     end
 
     def handle_json_failure(n)
@@ -236,12 +243,13 @@ module Calvin
       @file_plan[:modify].each do |path|
         next if @observations.any? { |o| o[:label] == path }
 
-        Calvin::LOG.warn "verify_observations: '#{path}' in modify plan but not read — forcing read"
+        Calvin::LOG.warn "verify: '#{path}' in modify plan but not read — forcing read"
         content = @github.get_file_content(path)
         unless content
-          Calvin::LOG.warn "verify_observations: '#{path}' not found in repo — skipping"
+          Calvin::LOG.warn "verify: '#{path}' not found in repo — skipping"
           next
         end
+        Calvin.file_read(path, content.bytesize)
         record_observation("read_file", { "path" => path }, content.force_encoding("UTF-8"))
       end
     end
@@ -251,13 +259,28 @@ module Calvin
     # ---------------------------------------------------------------------------
 
     def implement_phase(turns)
-      Calvin::LOG.info "implement_phase after #{turns} explore turn(s) (temp=#{@temp_implement})"
-      Calvin::LOG.info "usage_explore: prompt=#{@usage_explore['prompt_tokens']} cached=#{@usage_explore['cached_tokens']} completion=#{@usage_explore['completion_tokens']} total=#{@usage_explore['total_tokens']} across #{turns} turn(s)"
+      Calvin.banner("IMPLEMENT", emoji: "✏️")
+      ep = @usage_explore["prompt_tokens"]
+      ec = @usage_explore["completion_tokens"]
+      ca = @usage_explore["cached_tokens"]
+      Calvin::LOG.info "explore summary  turns=#{turns}  in=#{ep} cached=#{ca} out=#{ec}  temp=#{@temp_implement}"
+
+      active_retrieval = @retrieval_implement.chunks.any? ? @retrieval_implement : @retrieval_explore
+      source_label     = @retrieval_implement.chunks.any? ? "implement" : "explore(fallback)"
+      Calvin::LOG.info "rag source=#{source_label}  chunks=#{active_retrieval.chunks.size}"
 
       response = @mistral.complete_messages(
         build_implement_messages,
         temperature: @temp_implement
       )
+
+      if response[:usage]
+        pt = response[:usage]["prompt_tokens"].to_i
+        ct = response[:usage]["completion_tokens"].to_i
+        Calvin::LOG.info "#{Color::DIM}tokens  in=#{pt} out=#{ct}#{Color::RESET}"
+      end
+
+      Calvin.done("implement done  #{(response[:content].bytesize / 1024.0).round(1)} KB output")
 
       {
         content:              response[:content],
@@ -270,16 +293,6 @@ module Calvin
       }
     end
 
-    # Costruisce l'array messages completo per la fase implement.
-    #
-    # Layout:
-    #   messages[0] role:system  — implement_system.md (formato/output istruzioni)
-    #   messages[1] role:system  — ## Rules + chunks RAG (solo se presenti)
-    #                              Secondo system message: più autorità del user message.
-    #                              Codestral pesa i messaggi system sopra quelli user.
-    #   messages[-1] role:user   — ## Task + file observations (senza ## Rules)
-    #
-    # Usa retrieval_implement se disponibile, altrimenti fallback su retrieval_explore.
     def build_implement_messages
       messages = []
       messages << { role: "system", content: build_implement_system }
@@ -291,18 +304,15 @@ module Calvin
         source = @retrieval_implement.chunks.any? ? "implement" : "explore (fallback)"
         rules_content = format_chunks_as_rules(chunks)
         messages << { role: "system", content: rules_content }
-        Calvin::LOG.info "context[rules/#{source}]: #{chunks.size} chunks → second system message (#{rules_content.bytesize} bytes)"
+        Calvin::LOG.info "rules/#{source}  #{chunks.size} chunks  #{(rules_content.bytesize / 1024.0).round(1)} KB → second system message"
       else
-        Calvin::LOG.info "context[rules]: no chunks available — skipping second system message"
+        Calvin::LOG.info "rules: no chunks — skipping second system message"
       end
 
       messages << { role: "user", content: build_implement_user }
       messages
     end
 
-    # Formatta i chunk RAG come secondo system message.
-    # Ogni chunk mostra source_path, source_type e similarity per dare al modello
-    # il contesto su cosa sta leggendo e quanto è rilevante.
     def format_chunks_as_rules(chunks)
       header = "## Architectural rules and project conventions\n" \
                "Apply ALL of the following without exception. " \
@@ -318,7 +328,6 @@ module Calvin
       "#{header}\n\n#{body}"
     end
 
-    # Costruisce il messaggio user per la fase implement (senza ## Rules).
     def build_implement_user
       sections = ["## Task", @issue_prompt]
 

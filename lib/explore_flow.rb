@@ -37,27 +37,34 @@ module Calvin
     private
 
     def build_prompt(issue:, stack:, github:)
+      Calvin.banner("EXPLORE FLOW  •  issue ##{issue.number}", emoji: "🚀")
       prompt = ContextBuilder.build(issue)
-      Calvin::LOG.info "ExploreFlow: prompt built (#{prompt.bytesize} bytes)"
+      Calvin::LOG.info "prompt built  #{(prompt.bytesize / 1024.0).round(1)} KB"
       Success(issue: issue, stack: stack, github: github, prompt: prompt)
     rescue => e
       Failure(step: :build_prompt, error: e.message, usage: nil, explore_turns: 0)
     end
 
     def retrieve_context(issue:, stack:, github:, prompt:)
+      Calvin.section("RAG retrieve")
       retrieval = ContextRetriever.call(issue)
-      Calvin::LOG.info "ExploreFlow: retrieval done — rules=#{retrieval.rules.nil? ? 'nil' : "#{retrieval.rules.bytesize}b"}, chunks=#{retrieval.chunks.size}"
+      kb = retrieval.rules ? (retrieval.rules.bytesize / 1024.0).round(1) : 0
+      Calvin::LOG.info "rules #{kb} KB  |  #{retrieval.chunks.size} chunks"
       Success(issue: issue, stack: stack, github: github, prompt: prompt, retrieval: retrieval)
     rescue => e
-      Calvin::LOG.warn "ExploreFlow: ContextRetriever failed (#{e.message}) — continuing without rules"
+      Calvin::LOG.warn "ContextRetriever failed (#{e.message}) — continuing without rules"
       empty = RetrievalResult.new(rules: nil, context: nil, chunks: [])
       Success(issue: issue, stack: stack, github: github, prompt: prompt, retrieval: empty)
     end
 
     def react_loop(issue:, stack:, github:, prompt:, retrieval:)
-      loop = ReActLoop.new(github, prompt, stack: stack, retrieval: retrieval, issue_number: issue.number)
-      result = loop.run
-      Calvin::LOG.info "ExploreFlow: react_loop done — turns=#{result[:turns]}, explore_chunks=#{result[:retrieval_explore].chunks.size}, implement_chunks=#{result[:retrieval_implement].chunks.size}"
+      loop_obj = ReActLoop.new(github, prompt, stack: stack, retrieval: retrieval, issue_number: issue.number)
+      result   = loop_obj.run
+
+      exp_c = result[:retrieval_explore].chunks.size
+      imp_c = result[:retrieval_implement].chunks.size
+      Calvin.done("react_loop  turns=#{result[:turns]}  rag_explore=#{exp_c}  rag_implement=#{imp_c}")
+
       Success(
         issue:                issue,
         stack:                stack,
@@ -77,7 +84,7 @@ module Calvin
     def parse_files(issue:, stack:, github:, content:, usage:, usage_explore:, temperature:, explore_turns:, retrieval_explore:, retrieval_implement:)
       files   = FileParser.parse(content)
       pr_body = FileParser.parse_pr_body(content)
-      Calvin::LOG.info "ExploreFlow: parsed #{files.size} file(s)"
+      Calvin::LOG.info "parsed #{files.size} file(s)  →  #{files.map { |f| f[:path] }.join(', ')}"
       Success(
         issue:                issue,
         github:               github,
@@ -95,6 +102,7 @@ module Calvin
     end
 
     def commit_and_pr(issue:, github:, files:, pr_body:, usage:, usage_explore:, temperature:, explore_turns:, retrieval_explore:, retrieval_implement:)
+      Calvin.section("commit + PR")
       outcome = CommitAndPr.call(
         issue:                issue,
         github:               github,
@@ -109,6 +117,7 @@ module Calvin
       return Failure(step: :commit_and_pr, error: outcome.failure[:error], usage: usage, explore_turns: explore_turns) if outcome.failure?
 
       result = outcome.value!
+      Calvin.done("PR aperta → #{result[:pr_url]}")
       Success(FlowResult.new(
         files:       result[:files],
         branch:      result[:branch],
