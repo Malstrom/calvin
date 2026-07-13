@@ -4,6 +4,7 @@
 # Interfaccia pubblica:
 #   ContextRetriever.call_for_explore(issue)      => RetrievalResult
 #   ContextRetriever.call_for_implement(file_plan) => RetrievalResult
+#   ContextRetriever.call_for_test(source_path)   => RetrievalResult
 #
 # RetrievalResult = Data.define(:rules, :context, :chunks)
 #   .rules   => String formattata con le regole attive, o nil se nessuna trovata
@@ -23,6 +24,15 @@
 #   2. Stessa pipeline embed + search con top_k: rag.top_k_implement
 #   3. Soglia: rag.similarity_threshold.implement (default 0.52)
 #
+# Flusso test:
+#   1. Costruisce query da source_path: "test {layer} {name}"
+#      es. "app/services/magic_link_service.rb" => "test service magic link"
+#   2. Chiama mistral-embed per l'embedding
+#   3. Chiama RPC calvin_context_search con source_types=['fixture','test_helper','rule']
+#      (RPC diversa da calvin_rules_search — filtra per tipo, non solo 'rule')
+#   4. Soglia: rag.similarity_threshold.test (default 0.55)
+#   5. top_k: rag.top_k_test (default 15)
+#
 # Se SUPABASE_URL o SUPABASE_SERVICE_KEY non sono presenti => .rules = nil silenzioso.
 # Se Mistral o Supabase sono down => .rules = nil silenzioso.
 
@@ -36,6 +46,8 @@ module Calvin
     EMBED_URL    = URI("https://api.mistral.ai/v1/embeddings")
     OPEN_TIMEOUT = 10
     READ_TIMEOUT = 20
+
+    TEST_SOURCE_TYPES = %w[fixture test_helper rule].freeze
 
     # Layer tokens estratti dal path per costruire query semantiche dai file.
     # Ordine: più specifici prima, fallback generico alla fine.
@@ -80,6 +92,20 @@ module Calvin
     end
 
     # ---------------------------------------------------------------------------
+    # Fase 3 — Test
+    # Query: "test {layer} {name}" costruita dal source_path
+    # RPC: calvin_context_search con source_types=['fixture','test_helper','rule']
+    # top_k: rag.top_k_test (default 15)
+    # soglia: rag.similarity_threshold.test (default 0.55)
+    # ---------------------------------------------------------------------------
+    def self.call_for_test(source_path)
+      top_k = Calvin::CONFIG.dig(:rag, :top_k_test) || 15
+      query = build_test_query(source_path)
+      Calvin::LOG.info "ContextRetriever[test]: query = #{query.inspect}, source_types=#{TEST_SOURCE_TYPES}"
+      new.call_with_query(query, top_k: top_k, phase: "test", source_types: TEST_SOURCE_TYPES)
+    end
+
+    # ---------------------------------------------------------------------------
     # Costruzione query
     # ---------------------------------------------------------------------------
 
@@ -112,6 +138,14 @@ module Calvin
       query
     end
 
+    # "test service magic link" — prefisso "test" sposta l'embedding verso
+    # fixture e test_helper oltre che verso le regole di quel layer.
+    def self.build_test_query(source_path)
+      layer = extract_layer(source_path.to_s) || "code"
+      name  = extract_name(source_path.to_s)
+      "test #{layer} #{name}".strip
+    end
+
     def self.extract_layer(path)
       segments = path.to_s.split("/")
       segments.find { |s| LAYER_TOKENS.any? { |l| s.include?(l) } }
@@ -128,9 +162,11 @@ module Calvin
 
     # ---------------------------------------------------------------------------
     # Pipeline comune: embed + search + filter
+    # source_types: se nil usa calvin_rules_search (comportamento storico)
+    #               se Array usa calvin_context_search con filtro per tipo
     # ---------------------------------------------------------------------------
 
-    def call_with_query(query, top_k:, phase: "unknown")
+    def call_with_query(query, top_k:, phase: "unknown", source_types: nil)
       unless supabase_configured?
         Calvin::LOG.info "ContextRetriever[#{phase}]: Supabase non configurato — skip"
         return RetrievalResult.new(rules: nil, context: nil, chunks: [])
@@ -140,15 +176,15 @@ module Calvin
       Calvin::LOG.info "ContextRetriever[#{phase}]: query_length = #{query.length} chars, top_k = #{top_k}"
 
       embedding = embed(query)
-      raw       = search_rules(embedding, top_k)
+      raw       = source_types ? search_context(embedding, top_k, source_types) : search_rules(embedding, top_k)
       chunks    = filter_by_threshold(raw, phase)
 
       if chunks.empty?
-        Calvin::LOG.info "ContextRetriever[#{phase}]: nessuna regola trovata (#{raw.size} recuperate, tutte sotto soglia)"
+        Calvin::LOG.info "ContextRetriever[#{phase}]: nessun chunk trovato (#{raw.size} recuperati, tutti sotto soglia)"
         return RetrievalResult.new(rules: nil, context: nil, chunks: [])
       end
 
-      Calvin::LOG.info "ContextRetriever[#{phase}]: #{chunks.size}/#{raw.size} regola/e accettate (threshold=#{similarity_threshold(phase)})"
+      Calvin::LOG.info "ContextRetriever[#{phase}]: #{chunks.size}/#{raw.size} chunk accettati (threshold=#{similarity_threshold(phase)})"
       log_chunks(chunks, phase)
 
       RetrievalResult.new(rules: format_rules(chunks), context: nil, chunks: chunks)
@@ -219,6 +255,7 @@ module Calvin
       data.dig("data", 0, "embedding") or raise "embedding non trovato nella risposta"
     end
 
+    # Usato da explore e implement — cerca solo source_type='rule' (hardcodato nella RPC).
     def search_rules(embedding, top_k)
       url     = URI("#{ENV['SUPABASE_URL']}/rest/v1/rpc/calvin_rules_search")
       api_key = ENV.fetch("SUPABASE_SERVICE_KEY")
@@ -238,13 +275,42 @@ module Calvin
       req["apikey"]          = api_key
       req["Authorization"]   = "Bearer #{api_key}"
       req["Content-Type"]    = "application/json"
-      # Forza risposta non compressa: Net::HTTP non decomprime automaticamente gzip
-      # e un body gzip causa JSON.parse failure con "unexpected character: '?'"
       req["Accept-Encoding"] = "identity"
       req.body = payload
 
       resp = http.request(req)
       Calvin::LOG.info "ContextRetriever[supabase]: HTTP #{resp.code}, content-encoding=#{resp['content-encoding'].inspect}, body_size=#{resp.body.bytesize}"
+      raise "Supabase RPC HTTP #{resp.code}: #{resp.body[0..200]}" unless resp.is_a?(Net::HTTPSuccess)
+
+      JSON.parse(resp.body)
+    end
+
+    # Usato da call_for_test — cerca su più source_types via calvin_context_search.
+    def search_context(embedding, top_k, source_types)
+      url     = URI("#{ENV['SUPABASE_URL']}/rest/v1/rpc/calvin_context_search")
+      api_key = ENV.fetch("SUPABASE_SERVICE_KEY")
+
+      payload = {
+        query_embedding: embedding,
+        match_count:     top_k,
+        target_repo:     target_repo,
+        source_types:    source_types
+      }.to_json
+
+      http = Net::HTTP.new(url.host, url.port)
+      http.use_ssl      = true
+      http.open_timeout = OPEN_TIMEOUT
+      http.read_timeout = READ_TIMEOUT
+
+      req = Net::HTTP::Post.new(url)
+      req["apikey"]          = api_key
+      req["Authorization"]   = "Bearer #{api_key}"
+      req["Content-Type"]    = "application/json"
+      req["Accept-Encoding"] = "identity"
+      req.body = payload
+
+      resp = http.request(req)
+      Calvin::LOG.info "ContextRetriever[supabase/context]: HTTP #{resp.code}, content-encoding=#{resp['content-encoding'].inspect}, body_size=#{resp.body.bytesize}"
       raise "Supabase RPC HTTP #{resp.code}: #{resp.body[0..200]}" unless resp.is_a?(Net::HTTPSuccess)
 
       JSON.parse(resp.body)
