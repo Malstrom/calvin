@@ -75,6 +75,6 @@ rag:
   query_body_limit: 2000    # caratteri del body inclusi nella query di embedding explore
 
   similarity_threshold:
-    explore:    0.60
-    implement:  0.52
-    test:       0.52
+    explore:    0.70
+    implement:  0.70
+    test:       0.70
