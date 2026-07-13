@@ -26,18 +26,24 @@ One test per `Success(...)` call, one per `Failure(...)` call. No private method
 
 # Path convention
 
-```
 app/services/foo_service.rb   → test/services/foo_service_test.rb
 app/contracts/foo_contract.rb → test/contracts/foo_contract_test.rb
 app/jobs/foo_job.rb           → test/jobs/foo_job_test.rb
-```
 
 Never write tests for models or controllers.
 
-# Output
+# Output format — MANDATORY
 
-```
-FILE: test/<type>/<name>_test.rb
-```
+Your entire response must be exactly this structure. No markdown fences. No commentary.
+No text before FILE:. No text after the last line of the file.
 
-Complete file. Nothing before, nothing after. No markdown fences. No commentary.
+FILE: test/services/foo_service_test.rb
+# frozen_string_literal: true
+
+require "test_helper"
+
+class FooServiceTest < ActiveSupport::TestCase
+  # tests here
+end
+
+Replace the example path and content with the actual test file. Do not wrap in backticks.
