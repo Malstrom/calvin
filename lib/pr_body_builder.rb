@@ -25,7 +25,7 @@ module Calvin
 
     def self.build(issue:, usage:, description: nil, usage_explore: nil, turns: nil,
                    retrieval_explore: nil, retrieval_implement: nil,
-                   retrieval: nil)
+                   retrieval: nil, validation: nil, repair_attempts: nil)
       model_version = Calvin::MODEL.to_s
 
       r_explore   = retrieval_explore || retrieval
@@ -36,6 +36,7 @@ module Calvin
         : description.to_s.strip
 
       parts = []
+      parts << validation_section(validation, repair_attempts) if validation
       parts << description_section
       parts << token_table(usage, usage_explore: usage_explore, turns: turns) if usage
       parts << rag_details(r_explore,   phase: "explore",   label: "RAG explore — rules used during exploration")
@@ -47,6 +48,39 @@ module Calvin
 
       parts.join("\n\n")
     end
+
+    # Esito della validation ladder, in testa al body: è la prima cosa che un reviewer
+    # deve sapere. Una PR verde dice quale livello di gate ha superato; una rossa mostra
+    # l'output dell'errore, così non serve aprire i log del workflow.
+    def self.validation_section(validation, repair_attempts)
+      attempts = repair_attempts.to_i
+      repair   = attempts.positive? ? " dopo #{attempts} tentativo/i di repair" : ""
+      level    = Calvin::CONFIG.dig(:validation, :level) || "static"
+
+      if validation.ok?
+        "✅ **Validazione superata** (`#{level}`)#{repair} — gate eseguiti prima di aprire la PR."
+      else
+        <<~MD.strip
+          ⚠️ **Validazione rossa sul gate `#{validation.stage}`**#{repair} — questa PR **non** è pronta al merge.
+
+          <details><summary>Output del gate</summary>
+
+          ```
+          #{truncate_output(validation.output)}
+          ```
+
+          </details>
+        MD
+      end
+    end
+
+    OUTPUT_LIMIT = 6000
+
+    def self.truncate_output(output)
+      str = output.to_s.gsub("```", "'''")
+      str.length > OUTPUT_LIMIT ? "#{str[0, OUTPUT_LIMIT]}\n… (troncato)" : str
+    end
+    private_class_method :truncate_output
 
     def self.review_comment(usage:, review_text: nil)
       model_version = Calvin::MODEL.to_s
@@ -125,8 +159,9 @@ module Calvin
 
       # etichette
       turns_label  = turns ? " (#{turns}t)" : ""
-      pct_explore  = ep > 0 ? " (#{(cached * 100.0 / ep).round}%%)" : ""
-      pct_total    = tp_total > 0 ? " (#{(ct_total * 100.0 / tp_total).round}%%)" : ""
+      # `%%` sarebbe corretto dentro format(), qui è interpolazione: finiva nel body come "50%%".
+      pct_explore  = ep > 0 ? " (#{(cached * 100.0 / ep).round}%)" : ""
+      pct_total    = tp_total > 0 ? " (#{(ct_total * 100.0 / tp_total).round}%)" : ""
       cached_exp   = cached > 0 ? "#{cached}#{pct_explore}" : "—"
       cached_tot   = ct_total > 0 ? "#{ct_total}#{pct_total}" : "—"
 

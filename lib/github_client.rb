@@ -121,18 +121,28 @@ module Calvin
       new_commit.sha
     end
 
-    # Crea un branch dal default branch
+    # Branch di default del repo target, letto dall'API (con fallback su config).
+    def default_branch
+      @default_branch ||= @client.repository(REPO).default_branch
+    rescue => e
+      fallback = Calvin::CONFIG.dig(:repo, :default_branch) || "main"
+      Calvin::LOG.warn "default_branch non leggibile (#{e.message}) — uso #{fallback}"
+      fallback
+    end
+
+    # Crea un branch dal default branch.
+    # Se il branch esiste già solleva: prima l'eccezione veniva inghiottita e un rerun
+    # committava sopra un branch stale, mescolando due run nella stessa PR.
     def create_branch(branch_name)
-      default_branch = @client.repository(REPO).default_branch
       sha = @client.branch(REPO, default_branch).commit.sha
       @client.create_ref(REPO, "refs/heads/#{branch_name}", sha)
     rescue Octokit::UnprocessableEntity
-      # branch already exists
+      raise "branch #{branch_name} già esistente su #{REPO} — un run precedente lo ha creato"
     end
 
-    # Apre una PR
-    def create_pull_request(title:, body:, head:, base: "main")
-      @client.create_pull_request(REPO, base, head, title, body)
+    # Apre una PR sul branch di default del repo target.
+    def create_pull_request(title:, body:, head:, base: nil)
+      @client.create_pull_request(REPO, base || default_branch, head, title, body)
     end
 
     # Ritorna i dati di una PR (branch, head sha, stato, ecc.).
