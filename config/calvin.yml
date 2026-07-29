@@ -46,6 +46,13 @@ repair:
   max_attempts: 3
   max_cost_usd: 1.00      # budget per run — oltre questa soglia il repair si ferma
 
+# Vincoli non deducibili dal codice, letti da .calvin/decisions.yml nel repo target.
+# Non passano dal DB vettoriale: sono poche righe e le vogliamo tutte, quindi non c'è
+# nulla da selezionare per similarità. In explore vengono iniettate tutte (il system
+# prompt è coperto dal prefix caching); in implement solo quelle degli scope toccati.
+decisions:
+  budget_bytes: 4096
+
 # Feature flag — unico punto di verità (prima il kill-switch era sparso su 3 file).
 features:
   generate_tests: false   # TestFlow/TestWriter: riattivare quando la ladder valida i test generati

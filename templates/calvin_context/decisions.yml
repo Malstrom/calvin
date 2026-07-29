@@ -1,17 +1,55 @@
 decisions: []
 
+# .calvin/decisions.yml — vincoli che Calvin NON può dedurre leggendo il codice.
+#
+# Calvin legge questo file dal clone locale a ogni run e lo inietta nel prompt per intero:
+# sono poche righe, le vuoi tutte, e non c'è nulla da cercare per similarità. È il motivo
+# per cui questa conoscenza non passa dal DB vettoriale.
+#
 # Append-only — never modify or remove existing entries.
 #
-# Add a new entry after each PR merge that introduces an architectural decision.
-# Source: Calvin notes in PR body → confirmed by Igor via review_pr scenario.
+# ── Cosa scrivere qui ────────────────────────────────────────────────────────────
 #
-# Format:
+# Solo ciò che è vero, utile e non ricavabile né da un check né dal codice:
+#
+#   deprecazioni      "Order#status è deprecato: usare Order#state. La colonna vecchia
+#                      esiste ancora, quindi il codice legacy la usa."
+#   vincoli di stack  "Le notifiche usano ActiveJob sulla coda :mailers. Sidekiq non è
+#                      nello stack, anche se compare come dipendenza transitiva."
+#   convenzioni non   "Le API pubbliche versionano (api/v1), le interne no."
+#     visibili
+#   tentativi falliti "Il caching delle sessioni su Rails.cache è stato rimosso: causava
+#                      invalidazioni incrociate fra tenant."
+#
+# ── Cosa NON scrivere qui ────────────────────────────────────────────────────────
+#
+#   "I model non contengono validates."   → è verificabile: sta in un gate del Validator
+#   "I controller chiamano un service."   → è visibile nel codice: lo insegna un file
+#                                           reale dello stesso layer, meglio di una frase
+#   "Usa nomi descrittivi."               → non è una decisione, è un auspicio
+#
+# Il criterio: se un check può verificarlo, non va qui. Se un file esistente lo dimostra,
+# non va qui. Se serve la tua testa, va qui.
+#
+# ── Scope opzionale ──────────────────────────────────────────────────────────────
+#
+# Senza `scope` la decisione entra in ogni run. Con `scope` entra solo quando la task tocca
+# quel layer, e non paghi token quando è irrilevante.
+# Scope validi: controller service model job serializer contract mailer query policy
+#               migration locale config test
+#
+# ── Formati accettati ────────────────────────────────────────────────────────────
+#
+# - "Le API pubbliche versionano (api/v1), le interne no."
+#
+# - text: "I job di notifica usano ActiveJob sulla coda :mailers."
+#   scope: job
+#
 # - date: "YYYY-MM-DD"
 #   decision: "Use dry-validation for all input contracts"
-#   rationale: "Consistent validation layer, integrates with dry-rb ecosystem already in use"
+#   rationale: "Consistent validation layer, integrates with dry-rb already in use"
 #   source: "PR #42"
+#   scope: contract
 #
-# - date: "YYYY-MM-DD"
-#   decision: "Jobs must be idempotent — always safe to retry"
-#   rationale: "Sidekiq retries on failure; non-idempotent jobs cause data corruption"
-#   source: "PR #67"
+# Il rationale entra nel prompt insieme alla decisione: il "perché" impedisce al modello
+# di generalizzare la regola oltre il suo dominio.

@@ -30,16 +30,28 @@ class ExploreFlowTest < Minitest::Test
     OUT
   }.freeze
 
-  # Doppio del client Mistral: risponde in sequenza alle chiamate explore e poi a implement.
+  # Doppio del client Mistral: risponde in sequenza alle chiamate explore e poi a implement,
+  # registrando i messaggi per poter verificare cosa è finito nel prompt.
   class ScriptedMistral
+    attr_reader :calls
+
     def initialize(explore:, implement:)
       @explore   = explore.dup
       @implement = implement
+      @calls     = []
     end
 
-    def complete_messages(_messages, temperature: nil, cache_key: nil)
+    def complete_messages(messages, temperature: nil, cache_key: nil)
+      @calls << { messages: messages, phase: cache_key ? :explore : :implement }
       content = cache_key ? @explore.shift : @implement
       { content: content, usage: { "prompt_tokens" => 500, "completion_tokens" => 200, "total_tokens" => 700 } }
+    end
+
+    def prompt_for(phase)
+      @calls.select { |c| c[:phase] == phase }
+            .flat_map { |c| c[:messages] }
+            .map { |m| m[:content].to_s }
+            .join("\n")
     end
   end
 
@@ -157,6 +169,57 @@ class ExploreFlowTest < Minitest::Test
     assert_empty github.commits
   end
 
+  # ── decisioni ─────────────────────────────────────────────────────────────────
+
+  # I vincoli non deducibili dal codice devono raggiungere il modello in entrambe le fasi:
+  # in explore tutti (il system prompt è cachato), in implement solo quelli degli scope
+  # toccati — così non si paga contesto per strati che la task non tocca.
+  def test_decisions_reach_both_prompts_filtered_by_scope_in_implement
+    decisions = <<~YAML
+      - "Le API pubbliche versionano (api/v1), le interne no."
+      - text: "I service ritornano sempre una monade."
+        scope: service
+      - text: "Le migration non rimuovono colonne."
+        scope: migration
+    YAML
+
+    github  = FakeGitHub.new
+    mistral = ScriptedMistral.new(
+      explore: ['{"thought":"basta","tool":"done","args":{"modify":[],"create":["app/services/new_service.rb"],"reference":[]}}'],
+      implement: MODEL_RESPONSES[:implement]
+    )
+
+    with_workspace(files: { Calvin::Decisions::PATH => decisions }) do |ws|
+      result = run_flow(github, mistral, workspace: ws)
+
+      assert result.success?, "flow fallito: #{result.failure if result.failure?}"
+
+      explore_prompt = mistral.prompt_for(:explore)
+      assert_includes explore_prompt, "Le API pubbliche versionano"
+      assert_includes explore_prompt, "Le migration non rimuovono colonne"
+
+      implement_prompt = mistral.prompt_for(:implement)
+      assert_includes implement_prompt, "Le API pubbliche versionano", "le globali valgono sempre"
+      assert_includes implement_prompt, "I service ritornano sempre una monade", "la task crea un service"
+      refute_includes implement_prompt, "Le migration non rimuovono colonne",
+                      "nessuna migration nel piano: iniettarla sarebbe contesto pagato e inutile"
+
+      assert_includes Array(result.value!.meta(:knowledge)), "decisions"
+    end
+  end
+
+  def test_knowledge_reports_only_gates_without_decisions
+    github  = FakeGitHub.new
+    mistral = ScriptedMistral.new(
+      explore: ['{"thought":"basta","tool":"done","args":{"modify":[],"create":["app/services/new_service.rb"],"reference":[]}}'],
+      implement: MODEL_RESPONSES[:implement]
+    )
+
+    result = run_flow(github, mistral)
+
+    assert_equal ["gates"], result.value!.meta(:knowledge)
+  end
+
   def test_failure_when_model_returns_no_file_blocks
     github  = FakeGitHub.new
     mistral = ScriptedMistral.new(
@@ -172,12 +235,12 @@ class ExploreFlowTest < Minitest::Test
 
   private
 
-  def run_flow(github, mistral)
+  def run_flow(github, mistral, workspace: nil)
     Calvin::ExploreFlow.new.call(
       issue:     Issue.build(number: 7, title: "Aggiungi NewService", body: "Serve un service."),
       github:    github,
       stack:     "rails",
-      workspace: nil,
+      workspace: workspace,
       mistral:   mistral
     )
   end

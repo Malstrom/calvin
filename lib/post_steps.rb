@@ -79,7 +79,8 @@ module Calvin
           issue_length:     issue&.body.to_s.length,
           validation_stage: r.meta(:validation_stage),
           validation_ok:    r.meta(:validation_ok),
-          repair_attempts:  r.meta(:repair_attempts)
+          repair_attempts:  r.meta(:repair_attempts),
+          knowledge:        r.meta(:knowledge)
         )
       else
         err = result.failure

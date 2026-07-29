@@ -37,7 +37,7 @@ module Calvin
       cost_usd status explore_turns
       tests_written writer_errors
       temperature files_written issue_length
-      validation validation_stage repair_attempts
+      validation validation_stage repair_attempts knowledge
     ].freeze
 
     STATUS_EMOJI = {
@@ -64,7 +64,8 @@ module Calvin
       issue_length:     nil,
       validation_stage: nil,
       validation_ok:    nil,
-      repair_attempts:  nil
+      repair_attempts:  nil,
+      knowledge:        nil
     )
       if Calvin.dry_run?
         Calvin::LOG.info "RunReporter: DRY RUN — report non scritto"
@@ -97,7 +98,8 @@ module Calvin
         issue_length.nil?  ? nil : issue_length.to_s,
         validation_ok.nil? ? nil : (validation_ok ? "green" : "red"),
         validation_stage.nil?  ? nil : validation_stage.to_s,
-        repair_attempts.nil?   ? nil : repair_attempts.to_s
+        repair_attempts.nil?   ? nil : repair_attempts.to_s,
+        knowledge.nil? ? nil : Array(knowledge).join("+")
       ]
 
       existing_csv = github.get_file_content(CSV_PATH)

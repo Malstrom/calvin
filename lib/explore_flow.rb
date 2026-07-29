@@ -51,29 +51,36 @@ module Calvin
 
       prompt = ContextBuilder.build(issue, reader: reader)
       Calvin::LOG.info "prompt built  #{(prompt.bytesize / 1024.0).round(1)} KB"
+
+      # I vincoli non deducibili dal codice vengono da un file versionato nel target,
+      # non da una similarity search: sono pochi, li vogliamo tutti, e non costano rete.
+      decisions = Decisions.load(workspace)
+      Calvin::LOG.warn "nessuna decisione: #{Decisions::PATH} assente nel repo target" unless decisions.any?
+
       Success(issue: issue, stack: stack, github: github, workspace: workspace,
-              mistral: mistral, reader: reader, prompt: prompt)
+              mistral: mistral, reader: reader, prompt: prompt, decisions: decisions)
     rescue => e
       Failure(step: :build_prompt, error: e.message, usage: nil, explore_turns: 0)
     end
 
-    def retrieve_context(issue:, stack:, github:, workspace:, mistral:, reader:, prompt:)
+    def retrieve_context(issue:, stack:, github:, workspace:, mistral:, reader:, prompt:, decisions:)
       Calvin.section("RAG retrieve")
       retrieval = ContextRetriever.call(issue)
       kb = retrieval.rules ? (retrieval.rules.bytesize / 1024.0).round(1) : 0
       Calvin::LOG.info "rules #{kb} KB  |  #{retrieval.chunks.size} chunks"
       Success(issue: issue, stack: stack, github: github, workspace: workspace, mistral: mistral,
-              reader: reader, prompt: prompt, retrieval: retrieval)
+              reader: reader, prompt: prompt, decisions: decisions, retrieval: retrieval)
     rescue => e
       Calvin::LOG.warn "ContextRetriever failed (#{e.message}) — continuing without rules"
       empty = RetrievalResult.new(rules: nil, context: nil, chunks: [])
       Success(issue: issue, stack: stack, github: github, workspace: workspace, mistral: mistral,
-              reader: reader, prompt: prompt, retrieval: empty)
+              reader: reader, prompt: prompt, decisions: decisions, retrieval: empty)
     end
 
-    def react_loop(issue:, stack:, github:, workspace:, mistral:, reader:, prompt:, retrieval:)
+    def react_loop(issue:, stack:, github:, workspace:, mistral:, reader:, prompt:, decisions:, retrieval:)
       loop_obj = ReActLoop.new(reader, prompt, stack: stack, retrieval: retrieval,
-                                              issue_number: issue.number, mistral: mistral)
+                                              issue_number: issue.number, mistral: mistral,
+                                              decisions: decisions)
       result   = loop_obj.run
 
       exp_c = result[:retrieval_explore].chunks.size
@@ -86,6 +93,7 @@ module Calvin
         github:               github,
         workspace:            workspace,
         mistral:              mistral,
+        decisions:            decisions,
         content:              result[:content],
         usage:                result[:usage],
         usage_explore:        result[:usage_explore],
@@ -100,8 +108,8 @@ module Calvin
       Failure(step: :react_loop, error: e.message, usage: nil, explore_turns: 0)
     end
 
-    def parse_files(issue:, stack:, github:, workspace:, mistral:, content:, usage:, usage_explore:,
-                    temperature:, explore_turns:, file_plan:, originals:,
+    def parse_files(issue:, stack:, github:, workspace:, mistral:, decisions:, content:, usage:,
+                    usage_explore:, temperature:, explore_turns:, file_plan:, originals:,
                     retrieval_explore:, retrieval_implement:)
       files   = FileParser.parse(content)
       pr_body = FileParser.parse_pr_body(content)
@@ -116,6 +124,7 @@ module Calvin
         github:               github,
         workspace:            workspace,
         mistral:              mistral,
+        decisions:            decisions,
         files:                files,
         pr_body:              pr_body,
         usage:                usage,
@@ -131,13 +140,24 @@ module Calvin
       Failure(step: :parse_files, error: e.message, usage: usage, explore_turns: explore_turns)
     end
 
+    # Quali fonti di conoscenza erano effettivamente disponibili in questo run.
+    # Serve perché il fallimento silenzioso è il modo in cui un componente muore senza
+    # che nessuno lo noti: prima, con Supabase in pausa, i run giravano con zero regole
+    # e nulla lo segnalava.
+    def knowledge_sources(decisions:, retrieval_explore:, retrieval_implement:)
+      sources = ["gates"] # i gate del Validator sono sempre attivi
+      sources << "decisions" if decisions&.any?
+      sources << "rag" if retrieval_explore&.chunks&.any? || retrieval_implement&.chunks&.any?
+      sources
+    end
+
     # Il codice viene eseguito qui, non dopo la PR. Se resta rosso dopo i tentativi di
     # repair, il comportamento dipende da validation.open_pr_when_red:
     #   true  → la PR si apre marcata (label + errori nel body), ispezionabile a mano
     #   false → nessuna PR, l'errore torna come Failure e finisce sull'issue
-    def validate_and_repair(issue:, github:, workspace:, mistral:, files:, pr_body:, usage:,
-                            usage_explore:, temperature:, explore_turns:, file_plan:, originals:,
-                            retrieval_explore:, retrieval_implement:)
+    def validate_and_repair(issue:, github:, workspace:, mistral:, decisions:, files:, pr_body:,
+                            usage:, usage_explore:, temperature:, explore_turns:, file_plan:,
+                            originals:, retrieval_explore:, retrieval_implement:)
       config = Calvin::CONFIG[:validation] || {}
       Calvin.phase_start(:validate, "level=#{config[:level] || 'static'}  #{files.size} file(s)")
 
@@ -180,6 +200,9 @@ module Calvin
         validation:           validation,
         repair_attempts:      repair_attempts,
         repair_usage:         repair_usage,
+        knowledge:            knowledge_sources(decisions: decisions,
+                                                retrieval_explore: retrieval_explore,
+                                                retrieval_implement: retrieval_implement),
         retrieval_explore:    retrieval_explore,
         retrieval_implement:  retrieval_implement
       )
@@ -188,7 +211,7 @@ module Calvin
     end
 
     def commit_and_pr(issue:, github:, files:, pr_body:, usage:, usage_explore:, temperature:,
-                      explore_turns:, validation:, repair_attempts:, repair_usage:,
+                      explore_turns:, validation:, repair_attempts:, repair_usage:, knowledge:,
                       retrieval_explore:, retrieval_implement:)
       Calvin.phase_start(:commit, "#{files.size} file(s)")
       outcome = CommitAndPr.call(
@@ -221,6 +244,7 @@ module Calvin
         ["tokens impl",     "in=#{ui['prompt_tokens']} out=#{ui['completion_tokens']}"],
         ["validation",      validation ? "#{validation.ok? ? 'verde' : "rosso/#{validation.stage}"} (repair=#{repair_attempts})" : "n/a"],
         ["tokens repair",   repair_attempts.to_i.positive? ? "in=#{ur['prompt_tokens']} out=#{ur['completion_tokens']}" : "—"],
+        ["knowledge",       Array(knowledge).join(" + ")],
         ["files written",   files.size],
         ["PR",              result[:pr_url]]
       ])
@@ -236,7 +260,8 @@ module Calvin
           explore_turns:    explore_turns,
           validation_ok:    validation&.ok?,
           validation_stage: validation&.stage,
-          repair_attempts:  repair_attempts
+          repair_attempts:  repair_attempts,
+          knowledge:        knowledge
         }
       ))
     rescue => e
