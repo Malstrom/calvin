@@ -1,0 +1,23 @@
+FILE: app/services/magic_link_service.rb
+# frozen_string_literal: true
+
+class MagicLinkService
+  def call(user)
+    Success(user)
+  end
+end
+
+FILE: config/routes.rb
+Rails.application.routes.draw do
+  namespace :api do
+    namespace :v1 do
+      post "auth/magic_link", to: "auth/magic_links#create"
+    end
+  end
+end
+
+PR_BODY_START
+## What this does
+
+Adds the magic link service.
+PR_BODY_END

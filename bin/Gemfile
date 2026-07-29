@@ -10,3 +10,10 @@ gem "dry-monads"
 gem "dry-transaction"
 gem "rubocop"
 gem "rubocop-rails-omakase"
+
+# Suite di test di Calvin (bundle exec rake test). Prima di questo gruppo il repo non
+# aveva né test né un modo di eseguirli.
+group :test do
+  gem "rake"
+  gem "minitest"
+end
