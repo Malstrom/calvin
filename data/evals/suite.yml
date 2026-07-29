@@ -1,0 +1,39 @@
+# Suite di eval — issue congelate su cui misurare Calvin.
+#
+# Uso:
+#   ruby bin/eval.rb --suite data/evals/suite.yml --label baseline
+#
+# Come popolarla: prendere le issue già processate da Calvin su synca (quelle con una PR
+# aperta e un esito noto) e dichiarare in expect_files i path che una buona
+# implementazione deve toccare. Servono 5–8 casi che coprano gli scenari tipici:
+# endpoint completo, migration + model, job, solo service, task ambigua.
+#
+# target_sha va aggiornato quando si vuole ri-pinnare la baseline a un nuovo stato del
+# repo target: confrontare due run fatti su SHA diversi non misura il prompt, misura il repo.
+
+target_repo: Malstrom/synca
+
+# SHA del repo target su cui il clone locale deve essere posizionato.
+# Lasciare vuoto significa "qualunque stato abbia il clone" — comodo ma non riproducibile.
+target_sha: ~
+
+validation_level: static
+
+issues: []
+# Esempio di caso, da sostituire con issue reali:
+#
+# issues:
+#   - number: 101
+#     note: endpoint completo — route, controller, service, contract, serializer
+#     expect_files:
+#       - config/routes.rb
+#       - app/controllers/api/v1/auth/magic_links_controller.rb
+#       - app/services/magic_link_service.rb
+#       - app/contracts/magic_link_contract.rb
+#       - app/serializers/magic_link_serializer.rb
+#
+#   - number: 104
+#     note: migration + colonne su model esistente
+#     expect_files:
+#       - db/migrate/[timestamp]_add_preferences_to_users.rb
+#       - app/models/user.rb

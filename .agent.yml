@@ -31,13 +31,29 @@ architecture:
   explore_flow:
     steps:
       - ContextBuilder
+      - ContextRetriever
       - ReActLoop
       - FileParser
+      - Validator + RepairLoop
       - CommitAndPr
       - PostSteps
     react_loop:
-      phase_1: explore_system.md — multi-turn, tools: read_file / list_dir / done
+      phase_1: explore_system.md — multi-turn, tools: read_file / list_dir / grep / done
       phase_2: implement_system.md — single call, FILE: blocks + PR_BODY
+      reads_from: RepoReader — clone locale (Workspace) con fallback Contents API
+    validation:
+      ladder: [syntax, rubocop, structural, zeitwerk, migrate, focused_test, full_test]
+      levels:
+        static: syntax + rubocop + structural — nessun ambiente Rails
+        full: aggiunge zeitwerk / migrate / focused_test — richiede Postgres e bundle del target
+      structural_gates:
+        - diff-guard — marker di elisione, definizioni scomparse, shrink oltre soglia
+        - file_plan vs output — nessun FILE block fuori piano, nessun path pianificato mancante
+        - timestamp migration maggiore dell'ultima esistente
+        - ogni route nuova ha un controller esistente o nel piano
+        - nessun validates/validate sotto app/models
+      rubocop_gate: solo offese NON correggibili — le correggibili le sistema RubocopAutocorrect
+      on_red: RepairLoop (repair.max_attempts) → se resta rosso, PR con label calvin:red
     post_steps:
       - RubocopAutocorrect
       - RunReporter
@@ -50,7 +66,12 @@ architecture:
 
 repo_structure:
   bin/calvin.rb: entry point — ModeRouter routing, case/in on mode, PostSteps.run
-  lib/boot.rb: requires, Calvin::CONFIG, logging, REPO_ROOTS
+  bin/eval.rb: eval harness — pass-rate su issue congelate, sempre in dry run
+  lib/boot.rb: requires, Calvin::CONFIG, logging, REPO_ROOTS, Calvin.feature?, Calvin.dry_run?
+  lib/workspace.rb: I/O sul clone locale del target (read/list/grep/write), path sandboxed
+  lib/repo_reader.rb: adapter di lettura — clone locale con fallback Contents API
+  lib/validator.rb: validation ladder + gate strutturali — ritorna Validator::Result
+  lib/repair_loop.rb: rimanda gate rosso + output reale al modello, max_attempts da config
   lib/flow_result.rb: Calvin::FlowResult
   lib/mode_router.rb: ModeRouter.for_labels(labels) → mode symbol
   lib/post_steps.rb: Calvin::PostSteps.run
@@ -99,6 +120,9 @@ working_principles:
   - push directly to main unless Igor explicitly asks for a PR
   - always read the relevant file before modifying it (get SHA for updates)
   - when fixing a prompt, critical rules go LAST (recency bias)
+  - if a rule can be verified deterministically, put it in Validator — not in a prompt
+  - every pure function gets a unit test in test/ (bundle exec rake test must stay green)
+  - prompt/config changes that affect model behaviour go through bin/eval.rb, not intuition
   - CSV rows must always be padded to CSV_HEADER.size columns
   - when Calvin generates model tests in a PR, delete them and fix implement_system.md
   - never merge PRs without Igor confirmation
