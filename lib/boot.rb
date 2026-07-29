@@ -46,11 +46,11 @@ module Calvin
       ts = time.strftime("%H:%M:%S")
 
       color = case severity
-              when "WARN"  then Color::YELLOW
-              when "ERROR" then Color::RED
-              when "INFO"  then Color::GRAY
-              else Color::RESET
-              end
+      when "WARN"  then Color::YELLOW
+      when "ERROR" then Color::RED
+      when "INFO"  then Color::GRAY
+      else Color::RESET
+      end
 
       level = severity.ljust(5)
       "#{Color::DIM}#{ts}#{Color::RESET}  #{color}#{level}#{Color::RESET}  #{msg}\n"
@@ -87,6 +87,8 @@ module Calvin
   PHASE_COLORS = {
     explore:   Color::CYAN,
     implement: Color::MAGENTA,
+    validate:  Color::BLUE,
+    repair:    Color::YELLOW,
     commit:    Color::GREEN
   }.freeze
 
@@ -206,17 +208,32 @@ module Calvin
   REPO = ENV.fetch("CALVIN_TARGET_REPO") { ENV.fetch("GITHUB_REPOSITORY") }.freeze
 
   REPO_ROOTS = (CONFIG.dig(:repo, :roots) || {}).transform_keys(&:to_s).freeze
+
+  # Feature flag — unico punto di verità (prima i kill-switch erano commenti sparsi nel codice).
+  def self.feature?(name)
+    (CONFIG.dig(:features, name.to_sym) || false) == true
+  end
+
+  # Dry run: nessun commit, nessuna PR, nessuna scrittura su GitHub.
+  # Usato da bin/eval.rb e per provare una modifica senza inquinare il repo target.
+  def self.dry_run?
+    %w[1 true yes].include?(ENV["CALVIN_DRY_RUN"].to_s.downcase)
+  end
 end
 
 require_relative "flow_result"
 require_relative "mode_router"
 require_relative "github_client"
+require_relative "workspace"
+require_relative "repo_reader"
 require_relative "mistral_client"
 require_relative "context_retriever"
 require_relative "context_builder"
 require_relative "file_parser"
 require_relative "pr_body_builder"
 require_relative "react_loop"
+require_relative "validator"
+require_relative "repair_loop"
 require_relative "commit_and_pr"
 require_relative "explore_flow"
 require_relative "test_writer"

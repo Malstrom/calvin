@@ -7,6 +7,49 @@ react:
   grace_turns: 2
   not_found_limit: 3
 
+# Clone locale del repo target, già presente nel workflow (actions/checkout path: target).
+# Usato dai tool del ReActLoop (read_file/list_dir/grep) e dal Validator.
+# Se il path non esiste, Calvin ricade sulla Contents API di GitHub.
+workspace:
+  target_path: ../target   # relativo a working-directory del job (target/), override: CALVIN_TARGET_PATH
+  grep_max_results: 80     # righe massime restituite da un grep — evita di saturare il contesto
+
+# Validation ladder eseguita sui file generati PRIMA di aprire la PR.
+#   static — gate senza ambiente Rails: syntax, rubocop, gate strutturali
+#   full   — aggiunge zeitwerk:check, db:migrate e i test mirati (richiede Postgres + bundle)
+validation:
+  level: static
+  open_pr_when_red: true    # true: apre la PR con label calvin:red; false: si ferma e commenta l'issue
+  red_label: calvin:red
+  gates:
+    syntax:       true
+    rubocop:      true
+    structural:   true
+    zeitwerk:     true    # solo con level: full
+    migrate:      true    # solo con level: full
+    focused_test: true    # solo con level: full
+    full_test:    false   # suite completa — costa minuti, off per default
+  timeout: 600            # secondi per singolo comando shell
+  # diff-guard: soglie per rilevare file esistenti riscritti in modo mutilato
+  diff_guard:
+    max_shrink_ratio: 0.25  # blocca se il file perde più del 25% delle righe senza richiesta esplicita
+    ellipsis_markers:
+      - "rest of file"
+      - "existing code"
+      - "unchanged"
+      - "as before"
+      - "resto del file"
+      - "codice esistente"
+
+# Repair loop: quando un gate è rosso, i file coinvolti tornano al modello con l'output dell'errore.
+repair:
+  max_attempts: 3
+  max_cost_usd: 1.00      # budget per run — oltre questa soglia il repair si ferma
+
+# Feature flag — unico punto di verità (prima il kill-switch era sparso su 3 file).
+features:
+  generate_tests: false   # TestFlow/TestWriter: riattivare quando la ladder valida i test generati
+
 sampling:
   temperature:
     explore:    0.0   # ReAct loop — deterministico: evita drift architetturale tra run identiche
@@ -58,6 +101,10 @@ rag:
   # Formato: "owner/repo" — es. "Malstrom/synca"
   target_repo: Malstrom/synca
 
+  # I top_k restano a 1 di proposito: alzarli è un cambio di comportamento del modello e va
+  # deciso con bin/eval.rb (baseline vs candidato), non a intuito. max_rules_bytes è già qui
+  # così che alzarli non possa far esplodere il contesto.
+
   # Fase 1 — explore: regole iniettate nel system prompt per orientare l'esplorazione.
   top_k_explore: 1
 
@@ -69,6 +116,8 @@ rag:
 
   # Chunk generici — predisposto per source_type futuri (scenari, docs, contratti).
   top_k_context: 5
+
+  max_rules_bytes: 24576    # budget massimo delle regole iniettate (24 KB) — troncamento ordinato
 
   embed_model: mistral-embed
   dedup_threshold: 0.92     # soglia similarità per skip all'ingest (non al retrieval)

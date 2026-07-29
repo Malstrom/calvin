@@ -37,6 +37,7 @@ module Calvin
       cost_usd status explore_turns
       tests_written writer_errors
       temperature files_written issue_length
+      validation validation_stage repair_attempts
     ].freeze
 
     STATUS_EMOJI = {
@@ -58,10 +59,18 @@ module Calvin
       explore_turns:  nil,
       tests_written:  nil,
       writer_errors:  nil,
-      temperature:    nil,
-      files_written:  nil,
-      issue_length:   nil
+      temperature:      nil,
+      files_written:    nil,
+      issue_length:     nil,
+      validation_stage: nil,
+      validation_ok:    nil,
+      repair_attempts:  nil
     )
+      if Calvin.dry_run?
+        Calvin::LOG.info "RunReporter: DRY RUN — report non scritto"
+        return
+      end
+
       pricing    = Calvin::CONFIG.dig(:pricing, :models) || {}
       prompt_tok  = usage&.fetch("prompt_tokens",     0).to_i
       compl_tok   = usage&.fetch("completion_tokens", 0).to_i
@@ -85,7 +94,10 @@ module Calvin
         writer_errors.nil? ? nil : writer_errors.to_s,
         temperature.nil?   ? nil : temperature.to_s,
         files_written.nil? ? nil : files_written.to_s,
-        issue_length.nil?  ? nil : issue_length.to_s
+        issue_length.nil?  ? nil : issue_length.to_s,
+        validation_ok.nil? ? nil : (validation_ok ? "green" : "red"),
+        validation_stage.nil?  ? nil : validation_stage.to_s,
+        repair_attempts.nil?   ? nil : repair_attempts.to_s
       ]
 
       existing_csv = github.get_file_content(CSV_PATH)

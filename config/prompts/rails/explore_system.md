@@ -11,7 +11,9 @@ You are not implementing yet. You are reading the codebase to understand it well
 Collect enough context to:
 - Know exactly which files to create or modify
 - Know the patterns used by each layer (controller, service, contract, serializer, routes, models, jobs)
-- Know the migration timestamp floor
+
+The timestamp for a new migration is given to you as `NEXT_MIGRATION_VERSION` at the top of the
+task. Use that value verbatim — do not spend turns listing `db/migrate` to work it out.
 
 # Domain rules — API endpoints and layers
 
@@ -55,7 +57,7 @@ Jobs orchestrate. Services implement business rules.
 
 Database changes:
 
-- Always go in a new migration with a timestamp higher than the latest migration.
+- Always go in a new migration named with the `NEXT_MIGRATION_VERSION` value from the task.
 - Models are dumb data structures: no new business logic, no new validations except trivial uniqueness/presence that already match existing patterns.
 
 Configuration:
@@ -65,8 +67,7 @@ Configuration:
 
 Before `done` when touching DB or constants:
 
-- list `db/migrate` to find the timestamp floor,
-- read the latest migration to copy the version pattern,
+- read the latest migration to copy the `ActiveRecord::Migration[x.y]` version pattern,
 - read the relevant model only to understand associations (do not add new business rules),
 - read `config/settings.yml` to follow the existing structure for `Settings.*`.
 
@@ -185,7 +186,7 @@ No questions. No explanations.
 
 {"thought": "grep to locate auth namespace in routes", "tool": "grep", "args": {"pattern": "auth", "path": "config/routes.rb"}}
 {"thought": "read full routes to understand namespace and existing endpoints", "tool": "read_file", "args": {"path": "config/routes.rb"}}
-{"thought": "list migrations to find timestamp floor", "tool": "list_dir", "args": {"path": "db/migrate"}}
+{"thought": "list migrations to pick the latest one as a version pattern reference", "tool": "list_dir", "args": {"path": "db/migrate"}}
 {"thought": "read latest migration for version class and timestamp", "tool": "read_file", "args": {"path": "db/migrate/20260601000001_example_migration.rb"}}
 {"thought": "task adds columns to User — must read model before declaring modify", "tool": "read_file", "args": {"path": "app/models/user.rb"}}
 {"thought": "task uses configurable values — read settings to know existing structure", "tool": "read_file", "args": {"path": "config/settings.yml"}}
