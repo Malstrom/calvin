@@ -1,5 +1,11 @@
 name: Calvin engine
 
+# Chiamato via workflow_call dal repo target.
+#
+# validation_level controlla la ladder eseguita da Calvin::Validator prima di aprire la PR:
+#   static — ruby -c, rubocop, gate strutturali (nessun ambiente Rails, job veloce)
+#   full   — aggiunge zeitwerk:check, db:migrate e i test mirati: richiede Postgres e
+#            `bundle install` nel repo target, quindi il job costa alcuni minuti in più.
 on:
   workflow_call:
     inputs:
@@ -9,6 +15,14 @@ on:
       target_repo:
         required: true
         type: string
+      validation_level:
+        required: false
+        type: string
+        default: static
+      dry_run:
+        required: false
+        type: boolean
+        default: false
     secrets:
       SYNCA_TOKEN:
         required: true
@@ -22,6 +36,22 @@ on:
 jobs:
   calvin:
     runs-on: ubuntu-latest
+
+    # Postgres serve ai gate db:migrate e focused_test (validation_level: full).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       # 1. Clona calvin (scripts + lib)
       - name: Checkout calvin
@@ -31,7 +61,7 @@ jobs:
           token: ${{ secrets.SYNCA_TOKEN }}
           path: calvin
 
-      # 2. Clona il repo target
+      # 2. Clona il repo target — è anche il workspace su cui Calvin legge e valida
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
@@ -54,7 +84,21 @@ jobs:
         run: bundle install
         working-directory: calvin/bin
 
-      # 5. Esegue Calvin
+      # 5. Dipendenze del repo target — solo per i gate full
+      - name: Install target dependencies
+        if: inputs.validation_level == 'full'
+        run: bundle install
+        working-directory: target/backend/api
+
+      - name: Prepare target test database
+        if: inputs.validation_level == 'full'
+        run: bin/rails db:prepare
+        working-directory: target/backend/api
+        env:
+          RAILS_ENV: test
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/synca_test
+
+      # 6. Esegue Calvin
       - name: Run Calvin
         run: bundle exec ruby $GITHUB_WORKSPACE/calvin/bin/calvin.rb
         working-directory: target
@@ -67,3 +111,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CALVIN_MODEL: codestral-latest
+          CALVIN_TARGET_PATH: ${{ github.workspace }}/target
+          CALVIN_VALIDATION_LEVEL: ${{ inputs.validation_level }}
+          CALVIN_DRY_RUN: ${{ inputs.dry_run }}
+          RAILS_ENV: test
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/synca_test

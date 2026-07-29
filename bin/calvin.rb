@@ -7,8 +7,10 @@
 #   :unknown       → errore esplicito
 #
 # Env:
-#   ISSUE_NUMBER   — numero issue synca
-#   GITHUB_TOKEN   — sempre richiesto
+#   ISSUE_NUMBER        — numero issue synca
+#   GITHUB_TOKEN        — sempre richiesto
+#   CALVIN_TARGET_PATH  — path del clone locale del repo target (default: workspace.target_path)
+#   CALVIN_DRY_RUN      — se attivo: nessun commit, nessuna PR
 
 require_relative "../lib/boot"
 
@@ -22,9 +24,12 @@ repo_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last 
 Calvin::LOG.info "labels: #{labels.join(', ')}"
 Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
 
-github  = Calvin::GitHubClient.new(repo_root: repo_root)
-mistral = Calvin::MistralClient.new
+github    = Calvin::GitHubClient.new(repo_root: repo_root)
+mistral   = Calvin::MistralClient.new
+workspace = Calvin::Workspace.new(repo_root: repo_root)
 Calvin::LOG.info "processing ##{issue.number}: #{issue.title}"
+Calvin::LOG.info "workspace: #{workspace.available? ? workspace.root : "non disponibile (#{workspace.root}) — lettura via API"}"
+Calvin::LOG.warn "DRY RUN attivo — nessuna scrittura su GitHub" if Calvin.dry_run?
 
 mode = Calvin::ModeRouter.for_labels(labels)
 Calvin::LOG.info "mode: #{mode}"
@@ -32,7 +37,13 @@ Calvin::LOG.info "mode: #{mode}"
 case mode
 in :explore_issue
   stack  = labels.include?("flutter") ? "flutter" : "rails"
-  result = Calvin::ExploreFlow.new.call(issue: issue, github: github, stack: stack)
+  result = Calvin::ExploreFlow.new.call(
+    issue:     issue,
+    github:    github,
+    stack:     stack,
+    workspace: workspace,
+    mistral:   mistral
+  )
   Calvin::PostSteps.run(
     result,
     github:   github,

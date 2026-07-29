@@ -1,0 +1,32 @@
+name: CI
+
+# CI di Calvin stesso. Prima non esisteva: il repo che scrive codice per altri non aveva
+# né test né lint, e i bug in funzioni pure (parser, CSV, escaping del PR body) sono
+# tornati più volte.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+        env:
+          BUNDLE_GEMFILE: bin/Gemfile
+
+      - name: Unit test
+        run: bundle exec rake test
+        env:
+          BUNDLE_GEMFILE: bin/Gemfile
+
+      - name: Lint
+        run: bundle exec rubocop lib bin test Rakefile
+        env:
+          BUNDLE_GEMFILE: bin/Gemfile

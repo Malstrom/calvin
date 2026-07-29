@@ -1,0 +1,23 @@
+FILE: app/models/user.rb
+```ruby
+# frozen_string_literal: true
+
+class User < ApplicationRecord
+  has_many :sessions
+end
+```
+
+FILE: app/services/user_creator.rb
+# frozen_string_literal: true
+
+class UserCreator
+  def call(params)
+    User.create(params)
+  end
+end
+
+PR_BODY_START
+## What this does
+
+Mixes a fenced block and a plain block in the same response.
+PR_BODY_END

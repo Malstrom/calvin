@@ -1,0 +1,40 @@
+# Stile di Calvin.
+#
+# Eredita da rubocop-rails-omakase (già nel Gemfile): è lo stile che il codice segue di
+# fatto — double quotes, nessuna imposizione su documentazione e metriche. Senza questo
+# file il lint girava con i default di rubocop e segnalava oltre 1200 offese stilistiche
+# contro le convenzioni effettive del repo.
+inherit_gem:
+  rubocop-rails-omakase: rubocop.yml
+
+AllCops:
+  TargetRubyVersion: 3.3
+  NewCops: enable
+  Exclude:
+    - bin/vendor/**/*
+    - data/**/*
+
+# I file di prompt e i template non sono Ruby: nessuna esclusione necessaria, ma i test
+# usano heredoc lunghi e stringhe di esempio, dove l'allineamento conta più della metrica.
+Layout/LineLength:
+  Enabled: false
+
+# Le classi di dominio di Calvin sono piccole e documentate in testa al file con un
+# commento esplicativo: la documentazione per costante non aggiunge nulla.
+Style/Documentation:
+  Enabled: false
+
+# I due cop seguenti sono in conflitto con lo stile che il repo usa da sempre. Riformattare
+# 36 file per soddisfarli produrrebbe un diff enorme e nessun beneficio: meglio dichiarare
+# la convenzione qui e tenere il gate di lint utile per i problemi veri.
+#
+# `# frozen_string_literal: true` è seguita direttamente dal commento che descrive il file.
+Layout/EmptyLineAfterMagicComment:
+  Enabled: false
+
+# Array scritti senza spazi interni: %w[a b], ["x"].
+Layout/SpaceInsideArrayLiteralBrackets:
+  Enabled: false
+
+# Layout/EndAlignment e Layout/ElseAlignment restano attivi con i default: le poche
+# occorrenze non allineate sono state corrette (whitespace, nessun cambio di semantica).

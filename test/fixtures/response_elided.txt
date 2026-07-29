@@ -1,0 +1,18 @@
+FILE: app/models/user.rb
+# frozen_string_literal: true
+
+class User < ApplicationRecord
+  has_many :sessions
+
+  # ... rest of file unchanged
+
+  def new_method
+    true
+  end
+end
+
+PR_BODY_START
+## What this does
+
+Adds new_method to User.
+PR_BODY_END

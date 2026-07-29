@@ -36,11 +36,26 @@ Self-check before emitting a FILE block for an existing file:
 3. Confirm every line is present in your output, in the correct position.
 4. Then add your new lines in the correct place.
 
+# Automated validation — your output is executed before the PR is opened
+
+Your files are written to a checkout of the repository and put through a validation ladder:
+syntax check, rubocop, structural checks, `zeitwerk:check`, `db:migrate`, targeted tests.
+
+If a gate fails you will receive the exact tool output and be asked to fix it. These checks are
+mechanical, so do not rely on being reminded — the following will be rejected automatically:
+
+- an elision marker (`# ... rest of file`, `# existing code`) anywhere in a file
+- a modified file that lost methods, constants or associations present in the original
+- a `FILE` block for a path that was not in your `modify` or `create` plan, or a planned path
+  with no `FILE` block
+- a migration whose timestamp is not higher than the latest existing migration
+- a route pointing at a controller that neither exists nor appears in your plan
+- `validates` or `validate` in a file under `app/models/`
+
 # Pre-output checklist
 
 Before emitting any FILE block, verify every item:
 - [ ] Every method called on a model object inside a serializer attribute block exists — confirmed by reading the model's serializer or the model file during exploration
-- [ ] No `validates` or `validate` in any model file
 - [ ] No response hash built in a service or controller — the serializer shapes JSON
 - [ ] The controller action contains only: auth check, service call, pattern match, serializer call, render
 - [ ] The service returns a record or value object — never a hash with display strings

@@ -50,8 +50,15 @@ module Calvin
 
     PROMPTS_DIR = File.expand_path("../../config/prompts", __FILE__)
 
-    def initialize(github, issue_prompt, stack: "rails", retrieval: nil, issue_number: nil)
-      @github       = github
+    # reader: oggetto con get_file_content / list_directory / grep_files.
+    # In produzione è un Calvin::RepoReader (clone locale con fallback API); accetta
+    # ancora un GitHubClient nudo, che espone la stessa interfaccia.
+    #
+    # mistral: iniettabile — il flow ne ha già un'istanza e i test ne passano un doppio,
+    # invece di dover stubbare MistralClient.new.
+    def initialize(reader, issue_prompt, stack: "rails", retrieval: nil, issue_number: nil,
+                   mistral: nil)
+      @reader       = reader
       @issue_prompt = issue_prompt
       @stack        = stack
 
@@ -62,7 +69,7 @@ module Calvin
       @retrieval_explore   = retrieval || RetrievalResult.new(rules: nil, context: nil, chunks: [])
       @retrieval_implement = RetrievalResult.new(rules: nil, context: nil, chunks: [])
 
-      @mistral      = MistralClient.new
+      @mistral      = mistral || MistralClient.new
       @observations     = []
       @file_plan        = nil
       @json_failures    = 0
@@ -248,7 +255,7 @@ module Calvin
         next if @observations.any? { |o| o[:label] == path }
 
         Calvin::LOG.warn "verify: '#{path}' in modify plan but not read — forcing read"
-        content = @github.get_file_content(path)
+        content = @reader.get_file_content(path)
         unless content
           Calvin::LOG.warn "verify: '#{path}' not found in repo — skipping"
           next
@@ -302,8 +309,18 @@ module Calvin
         usage_explore:        @usage_explore,
         temperature:          @temp_implement,
         retrieval_explore:    @retrieval_explore,
-        retrieval_implement:  @retrieval_implement
+        retrieval_implement:  @retrieval_implement,
+        file_plan:            @file_plan,
+        originals:            originals
       }
+    end
+
+    # Contenuto dei file così come il modello li ha letti durante l'esplorazione.
+    # È il riferimento del diff-guard: confrontare con la versione su disco non basta,
+    # perché quella potrebbe essere già stata sovrascritta.
+    def originals
+      @observations.reject { |o| o[:label].start_with?("ls ", "grep ") }
+                   .to_h { |o| [o[:label], o[:content]] }
     end
 
     def build_implement_messages
@@ -386,11 +403,11 @@ module Calvin
       return if observation.start_with?("ERROR:")
 
       label = case tool
-              when "read_file" then args["path"].to_s.strip
-              when "list_dir"  then "ls #{args['path'].to_s.strip}"
-              when "grep"      then "grep #{args['pattern'].to_s.strip} in #{args['path'].to_s.strip}"
-              else tool
-              end
+      when "read_file" then args["path"].to_s.strip
+      when "list_dir"  then "ls #{args['path'].to_s.strip}"
+      when "grep"      then "grep #{args['pattern'].to_s.strip} in #{args['path'].to_s.strip}"
+      else tool
+      end
 
       kb = (observation.bytesize / 1024.0).round(1)
       @observations << { label: label, content: observation.force_encoding("UTF-8"), kb: kb }
@@ -401,20 +418,20 @@ module Calvin
     # ---------------------------------------------------------------------------
 
     TOOLS = {
-      "read_file" => ->(github, args) {
+      "read_file" => ->(reader, args) {
         path    = args["path"].to_s.strip
-        content = github.get_file_content(path)
-        content ? content.force_encoding("UTF-8") : "ERROR: file not found: #{path}"
+        content = reader.get_file_content(path)
+        content ? content.dup.force_encoding("UTF-8") : "ERROR: file not found: #{path}"
       },
-      "list_dir" => ->(github, args) {
+      "list_dir" => ->(reader, args) {
         path    = args["path"].to_s.strip
-        entries = github.list_directory(path)
+        entries = reader.list_directory(path)
         entries.any? ? entries.join("\n") : "ERROR: empty or not found: #{path}"
       },
-      "grep" => ->(github, args) {
+      "grep" => ->(reader, args) {
         pattern = args["pattern"].to_s
         path    = args["path"].to_s.strip
-        github.grep_files(pattern, path)
+        reader.grep_files(pattern, path)
       }
     }.freeze
 
@@ -424,7 +441,7 @@ module Calvin
         Calvin::LOG.warn "Unknown tool: #{tool}"
         return "ERROR: unknown tool '#{tool}'. Use: read_file, list_dir, grep, done."
       end
-      handler.call(@github, args)
+      handler.call(@reader, args)
     rescue => e
       "ERROR: #{e.message}"
     end

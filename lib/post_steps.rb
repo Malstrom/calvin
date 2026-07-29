@@ -31,15 +31,19 @@ module Calvin
         r = result.value!  # Calvin::FlowResult
 
         source_paths = Array(r.files).map { |f| f[:path] }
-        # TestFlow disabled — generated tests are not reliable yet.
-        # Re-enable when test generation quality improves.
-        # tf = TestFlow.call(
-        #   source_paths,
-        #   branch:  r.branch || "",
-        #   github:  github,
-        #   mistral: mistral
-        # )
-        tf = Dry::Monads::Failure(:disabled)
+
+        # Kill-switch unico: features.generate_tests in config/calvin.yml.
+        # Prima era un commento qui, un reject in explore_flow e un commento in file_parser.
+        tf = if Calvin.feature?(:generate_tests) && !Calvin.dry_run?
+               TestFlow.call(
+                 source_paths,
+                 branch:  r.branch || "",
+                 github:  github,
+                 mistral: mistral
+               )
+        else
+               Dry::Monads::Failure(:disabled)
+        end
 
         if tf.success?
           stats     = tf.value!
@@ -49,28 +53,33 @@ module Calvin
           end
         end
 
-        Calvin::RubocopAutocorrect.run(
-          files:  r.files  || [],
-          branch: r.branch || "",
-          github: github
-        )
+        unless Calvin.dry_run?
+          Calvin::RubocopAutocorrect.run(
+            files:  r.files  || [],
+            branch: r.branch || "",
+            github: github
+          )
+        end
 
         tests_written = tf.success? ? tf.value![:tests_written] : nil
         writer_errors = tf.success? ? tf.value![:writer_errors] : nil
 
         Calvin::RunReporter.write(
-          github:        github,
-          workflow:      workflow,
-          ref:           ref,
-          model:         Calvin::MODEL,
-          usage:         r.usage,
-          status:        r.status,
-          explore_turns: r.meta(:explore_turns),
-          tests_written: tests_written,
-          writer_errors: writer_errors,
-          temperature:   r.temperature,
-          files_written: Array(r.files).size,
-          issue_length:  issue&.body.to_s.length
+          github:           github,
+          workflow:         workflow,
+          ref:              ref,
+          model:            Calvin::MODEL,
+          usage:            r.usage,
+          status:           r.status,
+          explore_turns:    r.meta(:explore_turns),
+          tests_written:    tests_written,
+          writer_errors:    writer_errors,
+          temperature:      r.temperature,
+          files_written:    Array(r.files).size,
+          issue_length:     issue&.body.to_s.length,
+          validation_stage: r.meta(:validation_stage),
+          validation_ok:    r.meta(:validation_ok),
+          repair_attempts:  r.meta(:repair_attempts)
         )
       else
         err = result.failure

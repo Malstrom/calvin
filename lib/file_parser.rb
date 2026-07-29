@@ -1,21 +1,25 @@
 # frozen_string_literal: true
 # Parsea la risposta del modello ed estrae i blocchi FILE: e il PR body.
 #
-# Formati FILE: block supportati (entrambi validi):
+# Formati FILE: block supportati, anche mescolati nella stessa risposta:
 #
-#   Formato con fence (vecchio):
+#   Con fence:
 #     FILE: path/to/file.rb
 #     ```ruby
 #     # contenuto completo
 #     ```
 #
-#   Formato senza fence (attuale — implement_system dice "no markdown fences"):
+#   Senza fence (formato richiesto da implement_system.md):
 #     FILE: path/to/file.rb
 #     # contenuto completo
-#     <riga vuota o prossimo FILE: o PR_BODY_START o fine stringa>
+#     <prossimo FILE: | PR_BODY_START | fine stringa>
+#
+# Prima questa classe provava il formato fenced e, solo se non trovava nulla, quello plain
+# (`return fenced if fenced.any?`): una risposta mista perdeva silenziosamente i blocchi
+# dell'altro formato e Calvin committava un sottoinsieme dei file. Ora la scansione è
+# unica e sequenziale, quindi i due formati convivono.
 #
 # Formato PR body:
-#
 #   PR_BODY_START
 #   ... markdown ...
 #   PR_BODY_END
@@ -25,34 +29,89 @@
 
 module Calvin
   class FileParser
-    # Formato con backtick fence: FILE: path\n```(lang)?\ncontent\n```
-    FILE_BLOCK_FENCED = /^FILE:\s*(.+?)\n```[\w]*\n(.*?)^```/m
+    # Header di un blocco: "FILE: path" a inizio riga.
+    FILE_HEADER = /^FILE:[ \t]*(\S.*?)[ \t]*$/
 
-    # Formato senza fence: FILE: path\ncontent\n (fino al prossimo FILE:, PR_BODY_START, o fine stringa)
-    FILE_BLOCK_PLAIN  = /^FILE:\s*(.+?)\n(.*?)(?=^FILE:|^PR_BODY_START|\z)/m
+    # Fence di apertura immediatamente dopo l'header (```ruby, ```rb, ``` …).
+    OPENING_FENCE = /\A```[\w+-]*[ \t]*\z/
+
+    CLOSING_FENCE = /\A```[ \t]*\z/
 
     PR_BODY_BLOCK = /^PR_BODY_START\s*\n(.*?)\nPR_BODY_END/m
 
-    # Test generation disabled — Calvin does not yet write reliable tests.
-    # Remove this filter once test quality is validated.
-    # SKIP_PATTERN = %r{^test/}
+    # Un path plausibile: nessuno spazio, nessun backtick.
+    PLAUSIBLE_PATH = %r{\A[\w./@+-]+\z}
 
     def self.parse(content)
-      # Prova prima il formato con fence
-      fenced = content.scan(FILE_BLOCK_FENCED).map do |path, file_content|
-        { path: path.strip, content: file_content }
-      end
-      return fenced if fenced.any?
+      lines  = content.to_s.lines
+      blocks = []
+      i      = 0
 
-      # Fallback: formato senza fence
-      content.scan(FILE_BLOCK_PLAIN).map do |path, file_content|
-        { path: path.strip, content: file_content.rstrip }
+      while i < lines.size
+        header = lines[i][FILE_HEADER, 1]
+        unless header
+          i += 1
+          next
+        end
+
+        path = header.strip.delete_suffix(":")
+        unless path.match?(PLAUSIBLE_PATH)
+          i += 1
+          next
+        end
+
+        i += 1
+        body, i = if lines[i].to_s.chomp.match?(OPENING_FENCE)
+                    read_fenced(lines, i + 1)
+        else
+                    read_plain(lines, i)
+        end
+
+        blocks << { path: path, content: body }
       end
+
+      blocks
     end
 
     def self.parse_pr_body(content)
-      match = content.match(PR_BODY_BLOCK)
+      match = content.to_s.match(PR_BODY_BLOCK)
       match&.captures&.first&.strip
     end
+
+    # Legge fino alla fence di chiusura. Se manca (risposta troncata) si ferma al prossimo
+    # marker: rilevare il troncamento è responsabilità di MistralClient, non del parser.
+    def self.read_fenced(lines, start)
+      body = []
+      i    = start
+
+      while i < lines.size
+        line = lines[i]
+        break if line.chomp.match?(CLOSING_FENCE)
+        break if line.match?(FILE_HEADER) || line.start_with?("PR_BODY_START")
+
+        body << line
+        i += 1
+      end
+
+      i += 1 if i < lines.size && lines[i].to_s.chomp.match?(CLOSING_FENCE)
+      [body.join, i]
+    end
+    private_class_method :read_fenced
+
+    def self.read_plain(lines, start)
+      body = []
+      i    = start
+
+      while i < lines.size
+        line = lines[i]
+        break if line.match?(FILE_HEADER) || line.start_with?("PR_BODY_START")
+
+        body << line
+        i += 1
+      end
+
+      [body.join.rstrip, i]
+    end
+    private_class_method :read_plain
   end
 end

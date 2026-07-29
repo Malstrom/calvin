@@ -45,19 +45,36 @@ Calvin legge la issue, esplora la codebase, implementa e apre PR. La CI valida i
 ```mermaid
 flowchart TD
     A([Label calvin su issue]) --> B[ModeRouter\nexplore_issue]
-    B --> C[ContextBuilder\nbuilds prompt da issue]
-    C --> D[ReActLoop PHASE 1\nread_file / list_dir / done]
+    B --> C[ContextBuilder\nprompt + NEXT_MIGRATION_VERSION]
+    C --> D[ReActLoop PHASE 1\nread_file / list_dir / grep / done\nsul clone locale]
     D --> E{Contesto sufficiente?}
     E -- No --> D
     E -- Si --> F[ReActLoop PHASE 2\nFILE blocks + PR_BODY]
     F --> G[FileParser]
-    G --> H[CommitAndPr\nbranch issue-NNN-slug-calvin]
+    G --> V[Validator\nsyntax / rubocop / structural\nzeitwerk / migrate / test]
+    V --> W{Gate verde?}
+    W -- No --> R[RepairLoop\nerrore reale al modello]
+    R --> V
+    W -- Si --> H[CommitAndPr\nbranch issue-NNN-calvin-runid]
     H --> I[PostSteps\nRubocop + RunReporter]
-    I --> J[CI\ntest + Brakeman + bundler-audit]
-    J --> K{CI passa?}
-    K -- Si --> L([PR aperta\ncode review umana])
-    K -- No --> L
+    I --> L([PR aperta\ncode review umana])
 ```
+
+Il codice viene **eseguito prima** della PR: il clone del repo target già presente nel workflow
+è il workspace su cui Calvin legge, scrive e valida. Se dopo `repair.max_attempts` un gate resta
+rosso, la PR si apre marcata con la label `calvin:red` e l'output dell'errore nel body
+(configurabile con `validation.open_pr_when_red`).
+
+### Livelli di validazione
+
+| Livello | Gate | Quando |
+|---------|------|--------|
+| `static` | `ruby -c`, rubocop, gate strutturali | default — nessun ambiente Rails richiesto |
+| `full` | + `zeitwerk:check`, `db:migrate`, test mirati | richiede Postgres e `bundle install` del target |
+
+I gate strutturali sono controlli deterministici che prima erano richieste in prosa nei prompt:
+diff-guard anti-troncamento, allineamento fra file_plan e output, timestamp migration,
+route senza controller, `validates` nei model.
 
 ---
 
@@ -90,20 +107,25 @@ flowchart TD
 
 ```
 bin/calvin.rb               entry point
+bin/eval.rb                 eval harness — pass-rate su issue congelate (dry run)
 lib/
-  boot.rb                   requires, config, logging
+  boot.rb                   requires, config, logging, feature flag, dry_run?
   mode_router.rb            label -> mode symbol
-  explore_flow.rb           ExploreFlow orchestrator
+  explore_flow.rb           ExploreFlow orchestrator (6 step)
   react_loop.rb             ReActLoop PHASE 1 + 2
-  context_builder.rb        builds prompt da issue + .calvin/*
-  file_parser.rb            parsa FILE: blocks dall'output LLM
+  context_builder.rb        prompt da issue + NEXT_MIGRATION_VERSION
+  file_parser.rb            parsa FILE: blocks (fenced + plain) dall'output LLM
+  workspace.rb              I/O sul clone locale del repo target
+  repo_reader.rb            lettura: clone locale con fallback Contents API
+  validator.rb              validation ladder + gate strutturali
+  repair_loop.rb            rimanda gli errori reali al modello
   commit_and_pr.rb          commit + apre PR su repo target
   mistral_client.rb         HTTP client Mistral API
   github_client.rb          GitHub API wrapper
   rubocop_autocorrect.rb    autocorrect + commit
-  rubocop_runner.rb         rubocop core
-  run_reporter.rb           aggiorna runs.csv + runs.md
-  pr_body_builder.rb        firma PR body
+  rubocop_runner.rb         rubocop core + offese non correggibili
+  run_reporter.rb           aggiorna runs.csv
+  pr_body_builder.rb        body PR: validazione, token, RAG, firma
   flow_result.rb            Calvin::FlowResult
   post_steps.rb             RunReporter + RubocopAutocorrect
 config/
@@ -111,9 +133,26 @@ config/
   prompts/rails/
     explore_system.md       system prompt PHASE 1
     implement_system.md     system prompt PHASE 2
+test/                       unit test (bundle exec rake test)
+data/evals/suite.yml        suite di eval
+.rubocop.yml                stile Calvin (rubocop-rails-omakase)
 .agent.yml                  manifesto AI
 .scenarios.yml              catalogo scenari chat
 overview.yml                contesto di alto livello
+```
+
+## Sviluppo
+
+```bash
+BUNDLE_GEMFILE=bin/Gemfile bundle install
+BUNDLE_GEMFILE=bin/Gemfile bundle exec rake        # test + lint
+BUNDLE_GEMFILE=bin/Gemfile bundle exec rake test   # solo unit test
+```
+
+Eval (nessun commit, nessuna PR — `CALVIN_DRY_RUN` è forzato):
+
+```bash
+ruby bin/eval.rb --suite data/evals/suite.yml --label baseline
 ```
 
 ---
@@ -137,4 +176,14 @@ Ogni PR Calvin contiene firma, token usage table e checkbox `- [ ] Approved`.
 
 - Ruby, gem `octokit`, `faraday`, `dry-monads`
 - Secrets: `GITHUB_TOKEN`, `MISTRAL_API_KEY`
-- Label `calvin` creata nel repo target
+- Label `calvin` e `calvin:red` create nel repo target
+- Per `validation.level: full`: Postgres nel job e dipendenze del repo target installate
+
+## Variabili d'ambiente
+
+| Variabile | Effetto |
+|-----------|---------|
+| `CALVIN_TARGET_PATH` | path del clone locale del repo target (default `workspace.target_path`) |
+| `CALVIN_VALIDATION_LEVEL` | `static` \| `full` — override di `validation.level` per singolo run |
+| `CALVIN_DRY_RUN` | nessun commit, nessuna PR, nessun report |
+| `CALVIN_MODEL` | override del modello |

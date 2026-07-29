@@ -25,6 +25,10 @@ require "json"
 
 module Calvin
   class MistralClient
+    # Sollevata quando il modello ha esaurito max_tokens: l'output è incompleto e
+    # committarlo significherebbe scrivere un file tagliato a metà nel repo target.
+    class TruncatedResponse < StandardError; end
+
     # Tutti i valori letti da CONFIG — nessun valore hardcodato.
     API_URL      = URI(Calvin::CONFIG.dig(:mistral, :api_url) || "https://api.mistral.ai/v1/chat/completions")
     OPEN_TIMEOUT = Calvin::CONFIG.dig(:http, :open_timeout) || 15
@@ -88,6 +92,16 @@ module Calvin
       if cache_key && usage
         cached = usage.dig("prompt_tokens_details", "cached_tokens").to_i
         Calvin::LOG.info "MistralClient: cached_tokens=#{cached} / #{usage['prompt_tokens']} prompt" if cached > 0
+      end
+
+      # Un troncamento (finish_reason: "length") va trattato come errore, non come warning:
+      # l'ultimo FILE block sarebbe tagliato a metà e verrebbe committato così com'è.
+      # Meglio far fallire lo step e vedere l'errore, che scrivere un file rotto nel repo.
+      if finish_reason == "length"
+        raise TruncatedResponse,
+              "risposta troncata a max_tokens=#{@max_tokens} " \
+              "(completion_tokens=#{usage&.dig('completion_tokens')}): " \
+              "l'output non è utilizzabile. Alza sampling.max_tokens o riduci lo scope della task."
       end
 
       Calvin::LOG.warn "MistralClient: finish_reason=#{finish_reason}" if finish_reason != "stop"
