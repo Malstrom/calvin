@@ -209,9 +209,30 @@ module Calvin
 
   REPO_ROOTS = (CONFIG.dig(:repo, :roots) || {}).transform_keys(&:to_s).freeze
 
+  # Configurazione effettiva del run: i default del motore (CONFIG) con sopra gli override
+  # del progetto target, se `.calvin/calvin.yml` esiste nel clone.
+  #
+  # CONFIG resta la costante congelata con i default; `Calvin.config` è ciò che il codice
+  # deve leggere a runtime. Le costanti caricate all'avvio (MAX_TURNS, API_URL, …)
+  # appartengono al motore e non sono sovrascrivibili da un progetto — per questo restano
+  # legate a CONFIG.
+  def self.config
+    @config || CONFIG
+  end
+
+  # Chiamato da bin/calvin.rb quando il workspace è noto.
+  #
+  # root_workspace: workspace alternativo (tipicamente con repo_root: "") usato come
+  # fallback se .calvin/calvin.yml non si trova nella root bootstrap derivata dalle label —
+  # serve perché in un monorepo (es. synca) .calvin/ vive sotto la app root, ma un progetto
+  # senza monorepo lo metterà naturalmente nella root del repo.
+  def self.apply_project_config!(workspace, root_workspace: nil)
+    @config = ProjectConfig.load(workspace, root_workspace: root_workspace, defaults: CONFIG)
+  end
+
   # Feature flag — unico punto di verità (prima i kill-switch erano commenti sparsi nel codice).
   def self.feature?(name)
-    (CONFIG.dig(:features, name.to_sym) || false) == true
+    (config.dig(:features, name.to_sym) || false) == true
   end
 
   # Dry run: nessun commit, nessuna PR, nessuna scrittura su GitHub.
@@ -226,12 +247,12 @@ require_relative "mode_router"
 require_relative "github_client"
 require_relative "workspace"
 require_relative "repo_reader"
+require_relative "project_config"
 require_relative "mistral_client"
 require_relative "context_retriever"
 require_relative "context_builder"
 require_relative "file_parser"
 require_relative "pr_body_builder"
-require_relative "decisions"
 require_relative "react_loop"
 require_relative "validator"
 require_relative "error_signature"

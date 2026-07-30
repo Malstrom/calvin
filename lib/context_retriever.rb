@@ -61,7 +61,7 @@ module Calvin
     # --- Costruzione query ---------------------------------------------------
 
     def self.build_issue_query(issue)
-      body_limit = Calvin::CONFIG.dig(:rag, :query_body_limit) || 2000
+      body_limit = Calvin.config.dig(:rag, :query_body_limit) || 2000
       "#{issue.title} #{issue.body.to_s[0..body_limit]}".strip
     end
 
@@ -101,7 +101,7 @@ module Calvin
     end
 
     def self.config_top_k(phase, default:)
-      Calvin::CONFIG.dig(:rag, :"top_k_#{phase}") || default
+      Calvin.config.dig(:rag, :"top_k_#{phase}") || default
     end
 
     # --- Pipeline embed + search + filter ------------------------------------
@@ -142,14 +142,17 @@ module Calvin
       ENV["SUPABASE_URL"] && ENV["SUPABASE_SERVICE_KEY"]
     end
 
+    # Default a Calvin::REPO (il repo target del run corrente): senza questo, ogni progetto
+    # avrebbe dovuto dichiarare esplicitamente il proprio nome in .calvin/calvin.yml, un
+    # valore che Calvin conosce già dall'ambiente. Resta sovrascrivibile per i casi in cui
+    # i chunk ingestati usano un nome diverso (es. RAG condiviso fra fork).
     def target_repo
-      Calvin::CONFIG.dig(:rag, :target_repo) or
-        raise "rag.target_repo non configurato in config/calvin.yml"
+      Calvin.config.dig(:rag, :target_repo) || Calvin::REPO
     end
 
     def similarity_threshold(phase)
-      Calvin::CONFIG.dig(:rag, :similarity_threshold, phase.to_sym) ||
-        Calvin::CONFIG.dig(:rag, :similarity_threshold) ||
+      Calvin.config.dig(:rag, :similarity_threshold, phase.to_sym) ||
+        Calvin.config.dig(:rag, :similarity_threshold) ||
         0.60
     end
 
@@ -208,7 +211,7 @@ module Calvin
     end
 
     def embed_model
-      Calvin::CONFIG.dig(:rag, :embed_model) || "mistral-embed"
+      Calvin.config.dig(:rag, :embed_model) || "mistral-embed"
     end
 
     def format_rules(chunks)

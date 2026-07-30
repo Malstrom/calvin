@@ -55,7 +55,7 @@ module Calvin
     def self.validation_section(validation, repair_attempts)
       attempts = repair_attempts.to_i
       repair   = attempts.positive? ? " dopo #{attempts} tentativo/i di repair" : ""
-      level    = Calvin::CONFIG.dig(:validation, :level) || "static"
+      level    = Calvin.config.dig(:validation, :level) || "static"
 
       if validation.ok?
         "✅ **Validazione superata** (`#{level}`)#{repair} — gate eseguiti prima di aprire la PR."

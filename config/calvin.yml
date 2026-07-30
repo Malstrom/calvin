@@ -46,13 +46,6 @@ repair:
   max_attempts: 3
   max_cost_usd: 1.00      # budget per run — oltre questa soglia il repair si ferma
 
-# Vincoli non deducibili dal codice, letti da .calvin/decisions.yml nel repo target.
-# Non passano dal DB vettoriale: sono poche righe e le vogliamo tutte, quindi non c'è
-# nulla da selezionare per similarità. In explore vengono iniettate tutte (il system
-# prompt è coperto dal prefix caching); in implement solo quelle degli scope toccati.
-decisions:
-  budget_bytes: 4096
-
 # Feature flag — unico punto di verità (prima il kill-switch era sparso su 3 file).
 features:
   generate_tests: false   # TestFlow/TestWriter: riattivare quando la ladder valida i test generati
@@ -90,11 +83,11 @@ repo:
     rails:   backend/api
     flutter: frontend/mobile
 
-# Path specifici del progetto target (synca).
-# Usati da FixturesFetcher per localizzare fixtures e test_helper.
-project:
-  fixtures_dir:     backend/api/test/fixtures
-  test_helper_path: backend/api/test/test_helper.rb
+# Path del progetto target usati da FixturesFetcher per localizzare fixtures e
+# test_helper. Sono relativi alla root del repo (non alla app root: FixturesFetcher legge
+# via GitHubClient, non via Workspace) — ogni progetto li dichiara in .calvin/calvin.yml
+# sotto `project:`. Nessun default qui: sono specifici del singolo progetto, non del motore.
+project: {}
 
 pricing:
   models:
@@ -103,10 +96,10 @@ pricing:
       output_per_million: 0.90
 
 rag:
-  # Repo target da cui sono stati ingestati i chunk nel DB vettoriale.
-  # Deve corrispondere al valore della colonna `repo` in calvin_chunks.
-  # Formato: "owner/repo" — es. "Malstrom/synca"
-  target_repo: Malstrom/synca
+  # Repo da cui sono stati ingestati i chunk nel DB vettoriale (colonna `repo` in
+  # calvin_chunks). Default: Calvin::REPO (il repo target del run corrente) — un progetto
+  # lo sovrascrive in .calvin/calvin.yml solo se i chunk usano un nome diverso.
+  target_repo: ~
 
   # I top_k restano a 1 di proposito: alzarli è un cambio di comportamento del modello e va
   # deciso con bin/eval.rb (baseline vs candidato), non a intuito. max_rules_bytes è già qui

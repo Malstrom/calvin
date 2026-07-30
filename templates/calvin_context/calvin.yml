@@ -1,0 +1,31 @@
+# .calvin/calvin.yml — configurazione di QUESTO progetto per Calvin.
+#
+# Va copiato in .calvin/calvin.yml nel repo target (per synca: backend/api/.calvin/calvin.yml,
+# perché .calvin/ vive sotto la app root in questo monorepo — Calvin lo trova comunque anche
+# se lo metti nella root del repo, come fallback).
+#
+# Solo i campi che il progetto deve dichiarare: tutto il resto (temperature, retry, budget di
+# repair, modello) resta nel motore e non è sovrascrivibile da qui.
+#
+# stack: rails | flutter
+# root:  dove vive l'applicazione dentro il repo (es. "backend/api"). Se assente, Calvin usa
+#        la mappa di bootstrap per label in config/calvin.yml del motore.
+stack: rails
+# root: backend/api
+
+# Livello della validation ladder eseguita sul codice generato prima di aprire la PR:
+#   static — ruby -c, rubocop, gate strutturali (nessun ambiente Rails richiesto)
+#   full   — aggiunge zeitwerk:check, db:migrate e i test mirati (richiede Postgres + bundle
+#            del progetto nel workflow — vedi .github/workflows/calvin-engine.yml)
+validation:
+  level: static
+
+# Path usati per generare/verificare i test, relativi alla root del repo.
+project:
+  fixtures_dir: backend/api/test/fixtures
+  test_helper_path: backend/api/test/test_helper.rb
+
+# RAG: sovrascrivi solo se i chunk in calvin_chunks usano un nome di repo diverso dal
+# repo target corrente (default: automatico).
+# rag:
+#   target_repo: Malstrom/synca

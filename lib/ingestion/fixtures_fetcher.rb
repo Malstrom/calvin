@@ -19,11 +19,11 @@ require "base64"
 module Ingestion
   class FixturesFetcher
     def self.fixtures_dir
-      Calvin::CONFIG.dig(:project, :fixtures_dir) || "test/fixtures"
+      Calvin.config.dig(:project, :fixtures_dir) || "test/fixtures"
     end
 
     def self.test_helper_path
-      Calvin::CONFIG.dig(:project, :test_helper_path) || "test/test_helper.rb"
+      Calvin.config.dig(:project, :test_helper_path) || "test/test_helper.rb"
     end
 
     def self.from_repo(repo, ref: "main", changed_paths: nil)
