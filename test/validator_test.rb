@@ -200,6 +200,75 @@ class ValidatorTest < Minitest::Test
     assert_equal :skipped, result.stage
   end
 
+  # ── ordine autocorrect/valutazione ─────────────────────────────────────────────
+  #
+  # Regressione da un run reale: il gate rubocop scartava il risultato dell'autocorrect
+  # e valutava solo cosa restava rosso. La PR nasceva con le offese correggibili ancora
+  # presenti, e un commit separato le sistemava DOPO che la PR era già aperta — il repair
+  # loop, nel frattempo, sprecava tentativi su file che avevano anche offese banali mai
+  # ripulite. L'autocorrect va applicato PRIMA di decidere cosa è rosso.
+
+  # Documentato apposta: Style/Documentation non è correggibile e offuscherebbe il test
+  # (farebbe restare rosso il gate anche quando l'unica cosa che vogliamo è "solo offese
+  # correggibili").
+  MESSY_SERVICE = <<~RB
+    # Documented on purpose: Style/Documentation is not correctable.
+    class Messy
+      def call
+        x = 1
+        x
+      end
+    end
+  RB
+
+  def test_correctable_offense_is_fixed_even_when_gate_stays_red_for_another_reason
+    # redundant assignment (correggibile) + troppi parametri (non correggibile, resta rosso)
+    long_params = (1..12).map { |i| "a#{i}" }.join(", ")
+    original = <<~RB
+      # Documented on purpose: Style/Documentation is not correctable.
+      class Wide
+        def call(#{long_params})
+          x = 1
+          x
+        end
+      end
+    RB
+    files = [{ path: "app/services/wide.rb", content: original }]
+
+    result = Calvin::Validator.call(files: files, workspace: nil, github: FakeReader.new)
+
+    refute result.ok?
+    assert_equal :rubocop, result.stage
+    assert_includes result.output, "app/services/wide.rb"
+
+    # files è lo stesso array passato: la mutazione in place deve essere visibile qui.
+    # L'assegnazione ridondante correggibile deve sparire anche se il gate resta rosso
+    # per Metrics/ParameterLists (non correggibile).
+    refute_equal original, files.first[:content],
+                 "l'offesa correggibile doveva essere sistemata anche se il gate resta rosso"
+    refute_includes files.first[:content], "x = 1\n    x\n"
+  end
+
+  def test_only_correctable_offenses_turn_the_gate_green
+    files = [{ path: "app/services/messy.rb", content: MESSY_SERVICE }]
+
+    result = Calvin::Validator.call(files: files, workspace: nil, github: FakeReader.new)
+
+    assert result.ok?, "#{result.stage}: #{result.output}"
+    refute_equal MESSY_SERVICE, files.first[:content], "l'assegnazione ridondante andava rimossa"
+  end
+
+  def test_rubocop_corrections_are_written_back_to_the_workspace
+    with_workspace(files: {}) do |ws|
+      files = [{ path: "app/services/messy.rb", content: MESSY_SERVICE }]
+
+      result = Calvin::Validator.call(files: files, workspace: ws, github: nil)
+
+      assert result.ok?, "#{result.stage}: #{result.output}"
+      refute_equal MESSY_SERVICE, ws.read("app/services/messy.rb")
+    end
+  end
+
   def test_full_only_gates_are_skipped_at_static_level
     # Senza workspace i gate shell non sono eseguibili: a livello static non devono
     # nemmeno essere tentati, quindi il risultato resta verde.

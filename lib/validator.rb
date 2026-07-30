@@ -45,7 +45,7 @@ module Calvin
       @file_plan = file_plan || { modify: [], create: [], reference: [] }
       @originals = originals || {}
       @issue     = issue
-      @config    = Calvin::CONFIG[:validation] || {}
+      @config    = Calvin.config[:validation] || {}
     end
 
     def call
@@ -184,13 +184,43 @@ module Calvin
       return nil if rb.empty?
       return nil unless @github || @workspace&.available?
 
-      # remaining_offenses autocorregge e poi rilegge: quello che resta è ciò che
-      # RubocopAutocorrect non potrà sistemare, quindi ciò che farà rosso il lint del target.
       offenses = Calvin::RubocopRunner.remaining_offenses(files: rb, github: @github)
       return ok(:rubocop, "rubocop non eseguibile — gate saltato") if offenses.nil?
+
+      # Il contenuto autocorretto va applicato SUBITO, prima di valutare cosa resta rosso:
+      # altrimenti la PR viene committata con le offese correggibili ancora presenti, e un
+      # secondo commit post-PR le sistema dopo — repair sprecato a inseguire problemi che
+      # l'autocorrect risolveva gratis, e una PR che nasce rossa per errori banali.
+      apply_rubocop_corrections(offenses[:corrected_files])
+
       return ok(:rubocop, "nessuna offesa residua") if offenses[:count].zero?
 
       red(:rubocop, offenses[:output], offenses[:paths])
+    end
+
+    # Muta i file in @files in place: sono gli stessi oggetti passati dal chiamante
+    # (Array(files) non duplica), quindi la correzione si propaga a ExploreFlow,
+    # RepairLoop e CommitAndPr senza bisogno di restituirla esplicitamente.
+    def apply_rubocop_corrections(corrected_files)
+      return if corrected_files.nil? || corrected_files.empty?
+
+      by_path = corrected_files.to_h { |f| [f[:path], f[:content]] }
+      changed = @files.count do |f|
+        next false unless by_path.key?(f[:path]) && f[:content] != by_path[f[:path]]
+
+        f[:content] = by_path[f[:path]]
+        true
+      end
+
+      return unless changed.positive?
+
+      Calvin::LOG.info "Validator: rubocop autocorrect applicato a #{changed} file(s)"
+
+      # I gate successivi (structural, zeitwerk, migrate, focused_test) leggono dal
+      # working tree: senza riscriverlo vedrebbero ancora il contenuto pre-correzione.
+      return unless @workspace&.available?
+
+      @files.each { |f| @workspace.write(f[:path], f[:content]) if by_path.key?(f[:path]) }
     end
 
     # ── gate 3: structural ─────────────────────────────────────────────────────
