@@ -169,46 +169,12 @@ class ExploreFlowTest < Minitest::Test
     assert_empty github.commits
   end
 
-  # ── decisioni ─────────────────────────────────────────────────────────────────
+  # ── knowledge_source ──────────────────────────────────────────────────────────
 
-  # I vincoli non deducibili dal codice devono raggiungere il modello in entrambe le fasi:
-  # in explore tutti (il system prompt è cachato), in implement solo quelli degli scope
-  # toccati — così non si paga contesto per strati che la task non tocca.
-  def test_decisions_reach_both_prompts_filtered_by_scope_in_implement
-    decisions = <<~YAML
-      - "Le API pubbliche versionano (api/v1), le interne no."
-      - text: "I service ritornano sempre una monade."
-        scope: service
-      - text: "Le migration non rimuovono colonne."
-        scope: migration
-    YAML
-
-    github  = FakeGitHub.new
-    mistral = ScriptedMistral.new(
-      explore: ['{"thought":"basta","tool":"done","args":{"modify":[],"create":["app/services/new_service.rb"],"reference":[]}}'],
-      implement: MODEL_RESPONSES[:implement]
-    )
-
-    with_workspace(files: { Calvin::Decisions::PATH => decisions }) do |ws|
-      result = run_flow(github, mistral, workspace: ws)
-
-      assert result.success?, "flow fallito: #{result.failure if result.failure?}"
-
-      explore_prompt = mistral.prompt_for(:explore)
-      assert_includes explore_prompt, "Le API pubbliche versionano"
-      assert_includes explore_prompt, "Le migration non rimuovono colonne"
-
-      implement_prompt = mistral.prompt_for(:implement)
-      assert_includes implement_prompt, "Le API pubbliche versionano", "le globali valgono sempre"
-      assert_includes implement_prompt, "I service ritornano sempre una monade", "la task crea un service"
-      refute_includes implement_prompt, "Le migration non rimuovono colonne",
-                      "nessuna migration nel piano: iniettarla sarebbe contesto pagato e inutile"
-
-      assert_includes Array(result.value!.meta(:knowledge)), "decisions"
-    end
-  end
-
-  def test_knowledge_reports_only_gates_without_decisions
+  # I gate del Validator sono l'unica fonte sempre attiva: senza RAG (Supabase assente o
+  # senza chunk sopra soglia) il run resta comunque valido, ma il fatto va tracciato invece
+  # di sparire in silenzio.
+  def test_knowledge_reports_only_gates_without_rag
     github  = FakeGitHub.new
     mistral = ScriptedMistral.new(
       explore: ['{"thought":"basta","tool":"done","args":{"modify":[],"create":["app/services/new_service.rb"],"reference":[]}}'],

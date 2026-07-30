@@ -56,14 +56,11 @@ module Calvin
     #
     # mistral: iniettabile — il flow ne ha già un'istanza e i test ne passano un doppio,
     # invece di dover stubbare MistralClient.new.
-    # decisions: Calvin::Decisions::Set — vincoli non deducibili dal codice, iniettati
-    # per intero (sono poche e le vuoi tutte: nessun retrieval da fare).
     def initialize(reader, issue_prompt, stack: "rails", retrieval: nil, issue_number: nil,
-                   mistral: nil, decisions: nil)
+                   mistral: nil)
       @reader       = reader
       @issue_prompt = issue_prompt
       @stack        = stack
-      @decisions    = decisions || Calvin::Decisions::EMPTY
 
       run_id       = Process.pid
       issue_ref    = issue_number || "unknown"
@@ -130,27 +127,16 @@ module Calvin
     # Prompt assembly
     # ---------------------------------------------------------------------------
 
-    # In explore le decisioni entrano TUTTE (il file plan non è ancora noto) dentro il
-    # system prompt, che è coperto dal prefix caching: il costo si ammortizza sui turni.
-    # In implement entrano solo quelle degli scope toccati, perché lì non c'è cache.
     def build_explore_system
-      base     = load_prompt("explore_system.md")
-      sections = []
+      base = load_prompt("explore_system.md")
+      return base unless @retrieval_explore.rules
 
-      if (decisions = @decisions.to_prompt_section(budget_bytes: decisions_budget))
-        sections << decisions.sub("## Project decisions", "# Project decisions")
-      end
-
-      sections << "# Active rules — consult these while deciding which files to read\n\n#{@retrieval_explore.rules}\n" if @retrieval_explore.rules
-
-      return base if sections.empty?
-
-      block = sections.join("\n\n")
+      rules_section = "# Active rules — consult these while deciding which files to read\n\n#{@retrieval_explore.rules}\n"
 
       if base.include?("# Examples")
-        base.sub("# Examples", "#{block}\n\n# Examples")
+        base.sub("# Examples", "#{rules_section}\n# Examples")
       else
-        "#{base}\n\n#{block}"
+        "#{base}\n\n#{rules_section}"
       end
     end
 
@@ -341,13 +327,6 @@ module Calvin
       messages = []
       messages << { role: "system", content: build_implement_system }
 
-      # Le decisioni vanno in un system message dedicato, come le regole: hanno più
-      # autorità dell'user message e sono vincoli, non contesto.
-      if (decisions = decisions_section)
-        messages << { role: "system", content: decisions }
-        Calvin::LOG.info "decisions  #{(decisions.bytesize / 1024.0).round(1)} KB → system message"
-      end
-
       active_retrieval = @retrieval_implement.chunks.any? ? @retrieval_implement : @retrieval_explore
       chunks = active_retrieval.chunks
 
@@ -362,26 +341,6 @@ module Calvin
 
       messages << { role: "user", content: build_implement_user }
       messages
-    end
-
-    # In implement le decisioni vengono filtrate sugli scope dei file toccati: iniettare
-    # vincoli su strati che la task non tocca è solo contesto pagato e non usato.
-    def decisions_section
-      return nil unless @decisions.any?
-
-      scopes = touched_scopes
-      @decisions.to_prompt_section(scopes: scopes, budget_bytes: decisions_budget)
-    end
-
-    def touched_scopes
-      return nil unless @file_plan
-
-      paths = Array(@file_plan[:modify]) + Array(@file_plan[:create])
-      paths.filter_map { |p| Calvin::ErrorSignature.scope_for(p) }.uniq
-    end
-
-    def decisions_budget
-      Calvin::CONFIG.dig(:decisions, :budget_bytes) || 4096
     end
 
     def format_chunks_as_rules(chunks)

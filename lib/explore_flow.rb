@@ -52,35 +52,29 @@ module Calvin
       prompt = ContextBuilder.build(issue, reader: reader)
       Calvin::LOG.info "prompt built  #{(prompt.bytesize / 1024.0).round(1)} KB"
 
-      # I vincoli non deducibili dal codice vengono da un file versionato nel target,
-      # non da una similarity search: sono pochi, li vogliamo tutti, e non costano rete.
-      decisions = Decisions.load(workspace)
-      Calvin::LOG.warn "nessuna decisione: #{Decisions::PATH} assente nel repo target" unless decisions.any?
-
       Success(issue: issue, stack: stack, github: github, workspace: workspace,
-              mistral: mistral, reader: reader, prompt: prompt, decisions: decisions)
+              mistral: mistral, reader: reader, prompt: prompt)
     rescue => e
       Failure(step: :build_prompt, error: e.message, usage: nil, explore_turns: 0)
     end
 
-    def retrieve_context(issue:, stack:, github:, workspace:, mistral:, reader:, prompt:, decisions:)
+    def retrieve_context(issue:, stack:, github:, workspace:, mistral:, reader:, prompt:)
       Calvin.section("RAG retrieve")
       retrieval = ContextRetriever.call(issue)
       kb = retrieval.rules ? (retrieval.rules.bytesize / 1024.0).round(1) : 0
       Calvin::LOG.info "rules #{kb} KB  |  #{retrieval.chunks.size} chunks"
       Success(issue: issue, stack: stack, github: github, workspace: workspace, mistral: mistral,
-              reader: reader, prompt: prompt, decisions: decisions, retrieval: retrieval)
+              reader: reader, prompt: prompt, retrieval: retrieval)
     rescue => e
       Calvin::LOG.warn "ContextRetriever failed (#{e.message}) — continuing without rules"
       empty = RetrievalResult.new(rules: nil, context: nil, chunks: [])
       Success(issue: issue, stack: stack, github: github, workspace: workspace, mistral: mistral,
-              reader: reader, prompt: prompt, decisions: decisions, retrieval: empty)
+              reader: reader, prompt: prompt, retrieval: empty)
     end
 
-    def react_loop(issue:, stack:, github:, workspace:, mistral:, reader:, prompt:, decisions:, retrieval:)
+    def react_loop(issue:, stack:, github:, workspace:, mistral:, reader:, prompt:, retrieval:)
       loop_obj = ReActLoop.new(reader, prompt, stack: stack, retrieval: retrieval,
-                                              issue_number: issue.number, mistral: mistral,
-                                              decisions: decisions)
+                                              issue_number: issue.number, mistral: mistral)
       result   = loop_obj.run
 
       exp_c = result[:retrieval_explore].chunks.size
@@ -93,7 +87,6 @@ module Calvin
         github:               github,
         workspace:            workspace,
         mistral:              mistral,
-        decisions:            decisions,
         content:              result[:content],
         usage:                result[:usage],
         usage_explore:        result[:usage_explore],
@@ -108,7 +101,7 @@ module Calvin
       Failure(step: :react_loop, error: e.message, usage: nil, explore_turns: 0)
     end
 
-    def parse_files(issue:, stack:, github:, workspace:, mistral:, decisions:, content:, usage:,
+    def parse_files(issue:, stack:, github:, workspace:, mistral:, content:, usage:,
                     usage_explore:, temperature:, explore_turns:, file_plan:, originals:,
                     retrieval_explore:, retrieval_implement:)
       files   = FileParser.parse(content)
@@ -124,7 +117,6 @@ module Calvin
         github:               github,
         workspace:            workspace,
         mistral:              mistral,
-        decisions:            decisions,
         files:                files,
         pr_body:              pr_body,
         usage:                usage,
@@ -144,9 +136,8 @@ module Calvin
     # Serve perché il fallimento silenzioso è il modo in cui un componente muore senza
     # che nessuno lo noti: prima, con Supabase in pausa, i run giravano con zero regole
     # e nulla lo segnalava.
-    def knowledge_sources(decisions:, retrieval_explore:, retrieval_implement:)
+    def knowledge_sources(retrieval_explore:, retrieval_implement:)
       sources = ["gates"] # i gate del Validator sono sempre attivi
-      sources << "decisions" if decisions&.any?
       sources << "rag" if retrieval_explore&.chunks&.any? || retrieval_implement&.chunks&.any?
       sources
     end
@@ -155,10 +146,10 @@ module Calvin
     # repair, il comportamento dipende da validation.open_pr_when_red:
     #   true  → la PR si apre marcata (label + errori nel body), ispezionabile a mano
     #   false → nessuna PR, l'errore torna come Failure e finisce sull'issue
-    def validate_and_repair(issue:, github:, workspace:, mistral:, decisions:, files:, pr_body:,
+    def validate_and_repair(issue:, github:, workspace:, mistral:, files:, pr_body:,
                             usage:, usage_explore:, temperature:, explore_turns:, file_plan:,
                             originals:, retrieval_explore:, retrieval_implement:)
-      config = Calvin::CONFIG[:validation] || {}
+      config = Calvin.config[:validation] || {}
       Calvin.phase_start(:validate, "level=#{config[:level] || 'static'}  #{files.size} file(s)")
 
       validation = Validator.call(
@@ -200,8 +191,7 @@ module Calvin
         validation:           validation,
         repair_attempts:      repair_attempts,
         repair_usage:         repair_usage,
-        knowledge:            knowledge_sources(decisions: decisions,
-                                                retrieval_explore: retrieval_explore,
+        knowledge:            knowledge_sources(retrieval_explore: retrieval_explore,
                                                 retrieval_implement: retrieval_implement),
         retrieval_explore:    retrieval_explore,
         retrieval_implement:  retrieval_implement
@@ -269,7 +259,7 @@ module Calvin
     end
 
     def mark_red(github, pr_url, validation)
-      label = Calvin::CONFIG.dig(:validation, :red_label) || "calvin:red"
+      label = Calvin.config.dig(:validation, :red_label) || "calvin:red"
       number = pr_url.to_s[%r{/pull/(\d+)}, 1]
       return unless number
 
