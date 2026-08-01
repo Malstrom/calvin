@@ -1,17 +1,23 @@
 # frozen_string_literal: true
 # Flusso Calvin — triggerato dalla label 'calvin'.
-# Pipeline dry-transaction con 6 step espliciti:
+# Pipeline dry-transaction con 7 step espliciti:
 #
 #   build_prompt        — ContextBuilder costruisce il prompt dal title+body dell'issue
 #   retrieve_context    — ContextRetriever: query RAG su Supabase, ritorna RetrievalResult
 #   react_loop          — ReActLoop: il modello esplora e implementa
 #   parse_files         — estrae FILE: blocks e PR_BODY
-#   validate_and_repair — Validator + RepairLoop: il codice viene eseguito prima della PR
+#   generate_tests       — TestGenerator: scrive test per i file testabili (opt-in)
+#   validate_and_repair — Validator + RepairLoop: il codice (e i test) viene eseguito prima della PR
 #   commit_and_pr       — branch + commit + PR
 #
 # validate_and_repair è il passaggio che rende la pipeline closed-loop: i file generati
 # vengono materializzati nel clone locale, passati per la ladder di gate e, se un gate è
 # rosso, rimandati al modello con l'output reale dell'errore. La PR si apre solo dopo.
+#
+# I test generati entrano nel batch PRIMA di validate_and_repair (non dopo): così
+# syntax/rubocop/gate strutturali coprono codice e test in un solo giro, e un test che
+# non passa bin/rails test (livello full) rientra nella stessa ladder di repair generica
+# — nessun meccanismo di correzione dedicato.
 #
 # Stack ("rails" | "flutter") determinato dalle label dell'issue.
 # Default letto da CONFIG[:repo][:stacks][:default].
@@ -29,6 +35,7 @@ require_relative "react_loop"
 require_relative "file_parser"
 require_relative "validator"
 require_relative "repair_loop"
+require_relative "test_generator"
 require_relative "commit_and_pr"
 
 module Calvin
@@ -39,6 +46,7 @@ module Calvin
     step :retrieve_context
     step :react_loop
     step :parse_files
+    step :generate_tests
     step :validate_and_repair
     step :commit_and_pr
 
@@ -51,6 +59,7 @@ module Calvin
 
       prompt = ContextBuilder.build(issue, reader: reader)
       Calvin::LOG.info "prompt built  #{(prompt.bytesize / 1024.0).round(1)} KB"
+
       Success(issue: issue, stack: stack, github: github, workspace: workspace,
               mistral: mistral, reader: reader, prompt: prompt)
     rescue => e
@@ -100,13 +109,16 @@ module Calvin
       Failure(step: :react_loop, error: e.message, usage: nil, explore_turns: 0)
     end
 
-    def parse_files(issue:, stack:, github:, workspace:, mistral:, content:, usage:, usage_explore:,
-                    temperature:, explore_turns:, file_plan:, originals:,
+    def parse_files(issue:, stack:, github:, workspace:, mistral:, content:, usage:,
+                    usage_explore:, temperature:, explore_turns:, file_plan:, originals:,
                     retrieval_explore:, retrieval_implement:)
       files   = FileParser.parse(content)
       pr_body = FileParser.parse_pr_body(content)
 
-      files = files.reject { |f| f[:path].start_with?("test/") } unless Calvin.feature?(:generate_tests)
+      # implement_system.md vieta al modello di scrivere test/ (li scrive Calvin stesso
+      # nello step generate_tests, se abilitato) — filtro di sicurezza indipendente dal
+      # flag, nel caso il modello lo ignori.
+      files = files.reject { |f| f[:path].start_with?("test/") }
 
       raise "nessun FILE block nell'output del modello" if files.empty?
 
@@ -131,14 +143,65 @@ module Calvin
       Failure(step: :parse_files, error: e.message, usage: usage, explore_turns: explore_turns)
     end
 
+    # I test generati si aggiungono al batch PRIMA di validate_and_repair, e i loro path
+    # entrano in file_plan[:create] — altrimenti il gate strutturale
+    # check_file_plan_alignment li rifiuterebbe come "fuori dal piano" (quel gate confronta
+    # l'output col file_plan del modello, che non sa nulla dei test scritti da Calvin).
+    #
+    # Mai bloccante: un errore qui non deve mai far fallire una PR altrimenti valida —
+    # i test sono un'aggiunta, non un requisito del run.
+    def generate_tests(issue:, github:, workspace:, mistral:, files:, pr_body:, usage:,
+                       usage_explore:, temperature:, explore_turns:, file_plan:, originals:,
+                       retrieval_explore:, retrieval_implement:)
+      begin
+        reader    = RepoReader.new(workspace: workspace, github: github)
+        generated = TestGenerator.call(files: files, reader: reader, mistral: mistral)
+
+        if generated[:files].any?
+          Calvin::LOG.info "generate_tests: #{generated[:files].size} test file(s) — #{generated[:files].map { |f| f[:path] }.join(', ')}"
+          files     = files + generated[:files]
+          file_plan = file_plan.merge(create: Array(file_plan[:create]) + generated[:files].map { |f| f[:path] })
+        end
+      rescue => e
+        Calvin::LOG.warn "generate_tests: fallito (non bloccante) — #{e.class}: #{e.message}"
+      end
+
+      Success(
+        issue:                issue,
+        github:               github,
+        workspace:            workspace,
+        mistral:              mistral,
+        files:                files,
+        pr_body:              pr_body,
+        usage:                usage,
+        usage_explore:        usage_explore,
+        temperature:          temperature,
+        explore_turns:        explore_turns,
+        file_plan:            file_plan,
+        originals:            originals,
+        retrieval_explore:    retrieval_explore,
+        retrieval_implement:  retrieval_implement
+      )
+    end
+
+    # Quali fonti di conoscenza erano effettivamente disponibili in questo run.
+    # Serve perché il fallimento silenzioso è il modo in cui un componente muore senza
+    # che nessuno lo noti: prima, con Supabase in pausa, i run giravano con zero regole
+    # e nulla lo segnalava.
+    def knowledge_sources(retrieval_explore:, retrieval_implement:)
+      sources = ["gates"] # i gate del Validator sono sempre attivi
+      sources << "rag" if retrieval_explore&.chunks&.any? || retrieval_implement&.chunks&.any?
+      sources
+    end
+
     # Il codice viene eseguito qui, non dopo la PR. Se resta rosso dopo i tentativi di
     # repair, il comportamento dipende da validation.open_pr_when_red:
     #   true  → la PR si apre marcata (label + errori nel body), ispezionabile a mano
     #   false → nessuna PR, l'errore torna come Failure e finisce sull'issue
-    def validate_and_repair(issue:, github:, workspace:, mistral:, files:, pr_body:, usage:,
-                            usage_explore:, temperature:, explore_turns:, file_plan:, originals:,
-                            retrieval_explore:, retrieval_implement:)
-      config = Calvin::CONFIG[:validation] || {}
+    def validate_and_repair(issue:, github:, workspace:, mistral:, files:, pr_body:,
+                            usage:, usage_explore:, temperature:, explore_turns:, file_plan:,
+                            originals:, retrieval_explore:, retrieval_implement:)
+      config = Calvin.config[:validation] || {}
       Calvin.phase_start(:validate, "level=#{config[:level] || 'static'}  #{files.size} file(s)")
 
       validation = Validator.call(
@@ -180,6 +243,8 @@ module Calvin
         validation:           validation,
         repair_attempts:      repair_attempts,
         repair_usage:         repair_usage,
+        knowledge:            knowledge_sources(retrieval_explore: retrieval_explore,
+                                                retrieval_implement: retrieval_implement),
         retrieval_explore:    retrieval_explore,
         retrieval_implement:  retrieval_implement
       )
@@ -188,7 +253,7 @@ module Calvin
     end
 
     def commit_and_pr(issue:, github:, files:, pr_body:, usage:, usage_explore:, temperature:,
-                      explore_turns:, validation:, repair_attempts:, repair_usage:,
+                      explore_turns:, validation:, repair_attempts:, repair_usage:, knowledge:,
                       retrieval_explore:, retrieval_implement:)
       Calvin.phase_start(:commit, "#{files.size} file(s)")
       outcome = CommitAndPr.call(
@@ -221,6 +286,7 @@ module Calvin
         ["tokens impl",     "in=#{ui['prompt_tokens']} out=#{ui['completion_tokens']}"],
         ["validation",      validation ? "#{validation.ok? ? 'verde' : "rosso/#{validation.stage}"} (repair=#{repair_attempts})" : "n/a"],
         ["tokens repair",   repair_attempts.to_i.positive? ? "in=#{ur['prompt_tokens']} out=#{ur['completion_tokens']}" : "—"],
+        ["knowledge",       Array(knowledge).join(" + ")],
         ["files written",   files.size],
         ["PR",              result[:pr_url]]
       ])
@@ -236,7 +302,8 @@ module Calvin
           explore_turns:    explore_turns,
           validation_ok:    validation&.ok?,
           validation_stage: validation&.stage,
-          repair_attempts:  repair_attempts
+          repair_attempts:  repair_attempts,
+          knowledge:        knowledge
         }
       ))
     rescue => e
@@ -244,7 +311,7 @@ module Calvin
     end
 
     def mark_red(github, pr_url, validation)
-      label = Calvin::CONFIG.dig(:validation, :red_label) || "calvin:red"
+      label = Calvin.config.dig(:validation, :red_label) || "calvin:red"
       number = pr_url.to_s[%r{/pull/(\d+)}, 1]
       return unless number
 

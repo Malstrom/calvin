@@ -57,6 +57,33 @@ module Calvin
         yield Calvin::Workspace.new(repo_root: repo_root, target_path: dir)
       end
     end
+
+    # Sovrascrive temporaneamente Calvin.config con un override deep-merged sui default,
+    # senza toccare lo stato globale oltre la durata del blocco. Calvin.apply_project_config!
+    # muta @config a livello di modulo (stato di processo): chiamarlo direttamente in un
+    # test e non ripristinarlo farebbe trapelare la config in tutti i test successivi
+    # nello stesso processo Minitest.
+    def with_config_override(overrides)
+      original_method = Calvin.method(:config)
+      merged = overrides.each_with_object(Calvin::CONFIG.dup) do |(key, value), acc|
+        acc[key] = (Calvin::CONFIG[key] || {}).merge(value)
+      end
+      Calvin.define_singleton_method(:config) { merged }
+      yield
+    ensure
+      Calvin.define_singleton_method(:config, original_method)
+    end
+
+    # Come with_stubbed_validation ma generico: minitest/mock (`.stub`) non è disponibile
+    # in questa versione, quindi per sostituire temporaneamente un metodo di classe si usa
+    # define_singleton_method con salvataggio/ripristino esplicito del Method originale.
+    def with_stubbed_class_method(klass, method_name, return_value)
+      original = klass.method(method_name)
+      klass.define_singleton_method(method_name) { |**_kwargs| return_value }
+      yield
+    ensure
+      klass.define_singleton_method(method_name, original)
+    end
   end
 end
 

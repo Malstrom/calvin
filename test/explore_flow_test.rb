@@ -30,16 +30,44 @@ class ExploreFlowTest < Minitest::Test
     OUT
   }.freeze
 
-  # Doppio del client Mistral: risponde in sequenza alle chiamate explore e poi a implement.
+  # Doppio del client Mistral: risponde in sequenza alle chiamate explore, implement e
+  # (se abilitata) generate_tests, registrando i messaggi ricevuti. Le chiamate di
+  # generate_tests non passano cache_key, come implement: si distinguono dal system
+  # prompt (config/prompts/rails/test_system.md ha un incipit specifico).
   class ScriptedMistral
-    def initialize(explore:, implement:)
+    attr_reader :calls
+
+    def initialize(explore:, implement:, tests: [])
       @explore   = explore.dup
       @implement = implement
+      @tests     = tests.dup
+      @calls     = []
     end
 
-    def complete_messages(_messages, temperature: nil, cache_key: nil)
-      content = cache_key ? @explore.shift : @implement
+    def complete_messages(messages, temperature: nil, cache_key: nil)
+      phase = if cache_key
+                :explore
+      elsif messages.first[:content].to_s.include?("Write the complete test file")
+                :test
+      else
+                :implement
+      end
+
+      @calls << { messages: messages, phase: phase }
+
+      content = case phase
+      when :explore then @explore.shift
+      when :test    then @tests.shift
+      else @implement
+      end
       { content: content, usage: { "prompt_tokens" => 500, "completion_tokens" => 200, "total_tokens" => 700 } }
+    end
+
+    def prompt_for(phase)
+      @calls.select { |c| c[:phase] == phase }
+            .flat_map { |c| c[:messages] }
+            .map { |m| m[:content].to_s }
+            .join("\n")
     end
   end
 
@@ -157,6 +185,74 @@ class ExploreFlowTest < Minitest::Test
     assert_empty github.commits
   end
 
+  # ── knowledge_source ──────────────────────────────────────────────────────────
+
+  # I gate del Validator sono l'unica fonte sempre attiva: senza RAG (Supabase assente o
+  # senza chunk sopra soglia) il run resta comunque valido, ma il fatto va tracciato invece
+  # di sparire in silenzio.
+  def test_knowledge_reports_only_gates_without_rag
+    github  = FakeGitHub.new
+    mistral = ScriptedMistral.new(
+      explore: ['{"thought":"basta","tool":"done","args":{"modify":[],"create":["app/services/new_service.rb"],"reference":[]}}'],
+      implement: MODEL_RESPONSES[:implement]
+    )
+
+    result = run_flow(github, mistral)
+
+    assert_equal ["gates"], result.value!.meta(:knowledge)
+  end
+
+  # ── generate_tests ────────────────────────────────────────────────────────────
+
+  def test_generate_tests_is_a_noop_when_disabled
+    github  = FakeGitHub.new
+    mistral = ScriptedMistral.new(
+      explore: ['{"thought":"basta","tool":"done","args":{"modify":[],"create":["app/services/new_service.rb"],"reference":[]}}'],
+      implement: MODEL_RESPONSES[:implement]
+    )
+
+    result = run_flow(github, mistral) # test_generation.enabled è false di default
+
+    assert result.success?
+    assert_equal ["app/services/new_service.rb"], result.value!.files.map { |f| f[:path] }
+  end
+
+  # Il punto delicato: il test generato deve entrare nel file_plan (create), altrimenti
+  # il gate strutturale check_file_plan_alignment lo rifiuterebbe come "fuori dal piano"
+  # — quel gate confronta l'output col file_plan del modello, che non sa nulla dei test
+  # scritti da Calvin dopo il fatto.
+  def test_generated_test_enters_the_same_validation_batch_as_the_source
+    github  = FakeGitHub.new
+    mistral = ScriptedMistral.new(
+      explore: ['{"thought":"basta","tool":"done","args":{"modify":[],"create":["app/services/new_service.rb"],"reference":[]}}'],
+      implement: MODEL_RESPONSES[:implement],
+      tests: [<<~TEST]
+        FILE: test/services/new_service_test.rb
+        # frozen_string_literal: true
+
+        require "test_helper"
+
+        # Test generato da Calvin per NewService.
+        class NewServiceTest < ActiveSupport::TestCase
+          test "call returns true" do
+            assert NewService.new.call
+          end
+        end
+      TEST
+    )
+
+    result = with_config_override(test_generation: { enabled: true }) { run_flow(github, mistral) }
+
+    assert result.success?, "flow fallito: #{result.failure if result.failure?}"
+    value = result.value!
+    paths = value.files.map { |f| f[:path] }
+
+    assert_includes paths, "app/services/new_service.rb"
+    assert_includes paths, "test/services/new_service_test.rb"
+    assert_equal true, value.meta(:validation_ok),
+                "il file_plan deve includere il test generato, altrimenti il gate strutturale lo rifiuta come fuori piano"
+  end
+
   def test_failure_when_model_returns_no_file_blocks
     github  = FakeGitHub.new
     mistral = ScriptedMistral.new(
@@ -172,12 +268,12 @@ class ExploreFlowTest < Minitest::Test
 
   private
 
-  def run_flow(github, mistral)
+  def run_flow(github, mistral, workspace: nil)
     Calvin::ExploreFlow.new.call(
       issue:     Issue.build(number: 7, title: "Aggiungi NewService", body: "Serve un service."),
       github:    github,
       stack:     "rails",
-      workspace: nil,
+      workspace: workspace,
       mistral:   mistral
     )
   end

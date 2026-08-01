@@ -80,14 +80,21 @@ results = cases.map do |kase|
   row = { issue: number, started_at: started.utc.iso8601 }
 
   begin
-    github    = Calvin::GitHubClient.new
-    issue     = github.fetch_issue(number)
-    labels    = issue.labels.map(&:name)
-    repo_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last || ""
+    github         = Calvin::GitHubClient.new
+    issue          = github.fetch_issue(number)
+    labels         = issue.labels.map(&:name)
+    bootstrap_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last || ""
 
-    scoped    = Calvin::GitHubClient.new(repo_root: repo_root)
-    workspace = Calvin::Workspace.new(repo_root: repo_root)
-    stack     = labels.include?("flutter") ? "flutter" : "rails"
+    workspace      = Calvin::Workspace.new(repo_root: bootstrap_root)
+    root_workspace = bootstrap_root.empty? ? nil : Calvin::Workspace.new(repo_root: "")
+    Calvin.apply_project_config!(workspace, root_workspace: root_workspace)
+
+    declared_root = Calvin.config[:root].to_s
+    repo_root     = declared_root.empty? ? bootstrap_root : declared_root
+    workspace     = Calvin::Workspace.new(repo_root: repo_root) if repo_root != bootstrap_root
+
+    scoped = Calvin::GitHubClient.new(repo_root: repo_root)
+    stack  = labels.include?("flutter") ? "flutter" : "rails"
 
     result = Calvin::ExploreFlow.new.call(
       issue: issue, github: scoped, stack: stack,

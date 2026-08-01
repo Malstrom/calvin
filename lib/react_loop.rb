@@ -136,7 +136,7 @@ module Calvin
       if base.include?("# Examples")
         base.sub("# Examples", "#{rules_section}\n# Examples")
       else
-        base + "\n\n#{rules_section}"
+        "#{base}\n\n#{rules_section}"
       end
     end
 

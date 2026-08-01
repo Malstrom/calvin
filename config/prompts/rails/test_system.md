@@ -9,10 +9,8 @@ base classes, or patterns not present in the context you received.
 
 - **SOURCE**: the source file to test
 - **TEST FILE**: current test file — empty string if it does not exist yet
-- **FIXTURES**: YAML fixture files for the models referenced in the source
-- **TEST_HELPER**: test_helper.rb
+- **CONTEXT**: test_helper.rb and the YAML fixture files available in the project
 - **EXAMPLE**: one existing test file of the same type — follow its structure exactly
-- **RULES**: project rules (injected last)
 
 # Goal
 

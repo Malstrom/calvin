@@ -57,15 +57,24 @@ module Calvin
       { corrected: [], status: :error }
     end
 
-    # Offese che rubocop NON è in grado di correggere da solo.
+    # Autocorregge e riporta sia il contenuto corretto sia le offese che restano.
     #
-    # Distinzione importante: un'offesa correggibile (`correctable: true`) non deve far
-    # scattare il repair loop — mandarla al modello significherebbe spendere token per
-    # qualcosa che `rubocop --autocorrect` sistema gratis nel post-step. Sono le offese
-    # non correggibili (Style/Documentation, Metrics/*, Naming/*, …) quelle che restano
+    # Prima questo metodo scartava il risultato dell'autocorrect (girava in una tmpdir
+    # usa-e-getta solo per leggere cosa restava rosso): la PR veniva committata con le
+    # offese correggibili ancora presenti, e solo un secondo commit post-PR le sistemava.
+    # Risultato osservato in produzione: repair sprecato a inseguire offese che
+    # `--autocorrect` avrebbe già risolto, e una PR che nasceva marcata rossa per errori
+    # banali. Ora `corrected_files` contiene il contenuto DOPO l'autocorrect: il chiamante
+    # (Validator) lo scrive in @files prima di valutare cosa resta rosso, così il repair
+    # loop — e la PR — vedono solo il problema vero.
+    #
+    # Un'offesa correggibile (`correctable: true`) non deve mai far scattare il repair:
+    # mandarla al modello spenderebbe token per qualcosa che l'autocorrect fa gratis. Sono
+    # le non correggibili (Style/Documentation, Metrics/*, Naming/*, …) quelle che restano
     # rosse nel lint del repo target e che solo il modello può risolvere.
     #
-    # → { count: Integer, output: String, paths: [String] } | nil se rubocop non è eseguibile
+    # → { count:, output:, paths:, corrected_files: [{path:, content:}] } | nil se rubocop
+    #   non è eseguibile
     def self.remaining_offenses(files:, github: nil)
       rb_files = files.select { |f| f[:path].end_with?(".rb") }
       return nil if rb_files.empty?
@@ -91,10 +100,15 @@ module Calvin
         report   = JSON.parse(File.read(json_path))
         blocking = blocking_offenses(report, tmpdir)
 
+        corrected_files = rb_files.map do |f|
+          { path: f[:path], content: File.read(File.join(tmpdir, f[:path])) }
+        end
+
         {
-          count:  blocking.size,
-          output: format_offenses(blocking),
-          paths:  blocking.map { |o| o[:path] }.uniq
+          count:           blocking.size,
+          output:          format_offenses(blocking),
+          paths:           blocking.map { |o| o[:path] }.uniq,
+          corrected_files: corrected_files
         }
       end
     rescue => e

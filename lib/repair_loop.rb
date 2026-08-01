@@ -17,6 +17,8 @@
 
 require_relative "validator"
 require_relative "file_parser"
+require_relative "error_signature"
+require_relative "learning_store"
 
 module Calvin
   class RepairLoop
@@ -60,16 +62,22 @@ module Calvin
       @config     = Calvin::CONFIG[:repair] || {}
       @usage      = { "prompt_tokens" => 0, "completion_tokens" => 0, "total_tokens" => 0 }
       @attempts   = 0
+      @events     = []
     end
 
     def call
       return result if @validation.ok?
 
-      max = @config[:max_attempts] || 3
+      loop do
+        max = current_max_attempts
+        break if @attempts >= max
 
-      max.times do |i|
-        @attempts = i + 1
+        @attempts += 1
         Calvin.phase_start(:repair, "attempt #{@attempts}/#{max}  gate=#{@validation.stage}")
+
+        # L'evento va registrato prima di sapere l'esito: `fixed` viene aggiornato dopo la
+        # rivalidazione. Così anche un run che si interrompe lascia traccia dell'errore.
+        event = track(@validation, @attempts)
 
         if over_budget?
           Calvin::LOG.warn "RepairLoop: budget #{budget_limit}$ superato (#{format('%.4f', spent)}$) — stop"
@@ -94,6 +102,8 @@ module Calvin
           issue:     @issue
         )
 
+        event[:fixed] = @validation.ok?
+
         if @validation.ok?
           Calvin.phase_end(:repair, "verde dopo #{@attempts} tentativo/i")
           return result
@@ -109,10 +119,60 @@ module Calvin
     private
 
     def result
-      { files: @files, validation: @validation, attempts: @attempts, usage: @usage }
+      persist_events
+      { files: @files, validation: @validation, attempts: @attempts, usage: @usage, events: @events }
     end
 
-    def budget_limit = @config[:max_cost_usd] || 1.0
+    # ── apprendimento ──────────────────────────────────────────────────────────
+    #
+    # Ogni gate rosso è un dato: qui l'errore viene normalizzato in una firma
+    # aggregabile, così bin/learn.rb può contare quali errori Calvin ripete davvero.
+
+    def track(validation, attempt)
+      path = Array(validation.failed_paths).first
+
+      event = {
+        gate:          validation.stage.to_s,
+        signature:     Calvin::ErrorSignature.call(gate: validation.stage, output: validation.output),
+        path:          path,
+        scope:         path && Calvin::ErrorSignature.scope_for(path),
+        error_excerpt: validation.output.to_s.lines.first(6).join.strip,
+        fixed:         false,
+        attempt:       attempt
+      }
+
+      Calvin::LOG.info "RepairLoop: signature=#{event[:signature]}#{event[:scope] ? " scope=#{event[:scope]}" : ''}"
+      @events << event
+      event
+    end
+
+    def persist_events
+      return if @events.empty?
+      return if Calvin.dry_run?
+
+      Calvin::LearningStore.record(@events, issue_number: @issue&.number)
+    end
+
+    # Il budget segue il gate ATTUALMENTE rosso, non quello con cui RepairLoop è partito:
+    # se un test in test/ è il problema, si usa test_generation.max_attempts/max_cost_usd
+    # (più basso) invece di repair.max_attempts/max_cost_usd — un test ostinato non deve
+    # consumare il budget riservato al codice sorgente. @attempts resta un contatore unico
+    # condiviso: se il gate cambia a metà (es. da focused_test a rubocop), il tetto
+    # applicato è quello del gate corrente, non la somma dei due.
+    def test_gate?
+      @validation.stage == :focused_test &&
+        Array(@validation.failed_paths).any? { |p| p.to_s.start_with?("test/") }
+    end
+
+    def test_config = Calvin.config[:test_generation] || {}
+
+    def current_max_attempts
+      test_gate? ? (test_config[:max_attempts] || 2) : (@config[:max_attempts] || 3)
+    end
+
+    def budget_limit
+      test_gate? ? (test_config[:max_cost_usd] || 0.30) : (@config[:max_cost_usd] || 1.0)
+    end
 
     # Costo stimato con i prezzi in config — serve solo per fermarsi, non per il report.
     def spent

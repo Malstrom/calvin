@@ -111,6 +111,49 @@ class RepairLoopTest < Minitest::Test
     assert_empty mistral.calls
   end
 
+  # ── budget dedicato per i test generati ────────────────────────────────────────
+  #
+  # Un test ostinato non deve consumare il budget riservato al codice sorgente: quando
+  # il gate rosso è focused_test su un path sotto test/, il tetto è
+  # test_generation.max_attempts (2 di default), non repair.max_attempts (3).
+
+  def test_uses_test_generation_budget_when_focused_test_fails_on_a_test_path
+    files = [{ path: "test/services/foo_test.rb", content: "class FooTest; end\n" }]
+    red_focused_test = Calvin::Validator::Result.new(
+      ok: false, stage: :focused_test, output: "1 failure", failed_paths: ["test/services/foo_test.rb"]
+    )
+    # Il "fix" non risolve mai nulla: la rivalidazione (stubbata) resta sempre sullo
+    # stesso gate rosso, così il loop consuma l'intero budget dedicato ai test.
+    mistral = FakeMistral.new(Array.new(5) { "FILE: test/services/foo_test.rb\nclass FooTest; end\n" })
+
+    result = with_stubbed_validation(red_focused_test) do
+      Calvin::RepairLoop.call(files: files, validation: red_focused_test,
+                             workspace: nil, github: nil, mistral: mistral)
+    end
+
+    refute result[:validation].ok?
+    assert_equal Calvin::CONFIG.dig(:test_generation, :max_attempts), result[:attempts]
+    assert_operator result[:attempts], :<, Calvin::CONFIG.dig(:repair, :max_attempts),
+                    "il budget dei test deve essere più basso di quello generale, non uguale"
+  end
+
+  # Lo stesso gate (focused_test), ma su un path che NON è un test — non deve scattare
+  # il budget dedicato: resta quello generale del repair sul codice sorgente.
+  def test_general_budget_applies_to_focused_test_failures_outside_test_paths
+    files = [{ path: "app/services/foo.rb", content: "class Foo; end\n" }]
+    red_focused_test = Calvin::Validator::Result.new(
+      ok: false, stage: :focused_test, output: "1 failure", failed_paths: ["app/services/foo.rb"]
+    )
+    mistral = FakeMistral.new(Array.new(5) { "FILE: app/services/foo.rb\nclass Foo; end\n" })
+
+    result = with_stubbed_validation(red_focused_test) do
+      Calvin::RepairLoop.call(files: files, validation: red_focused_test,
+                             workspace: nil, github: nil, mistral: mistral)
+    end
+
+    assert_equal Calvin::CONFIG.dig(:repair, :max_attempts), result[:attempts]
+  end
+
   def test_accumulates_usage
     files   = [{ path: "app/services/broken.rb", content: BROKEN }]
     mistral = FakeMistral.new(["FILE: app/services/broken.rb\n#{FIXED}"])
@@ -135,5 +178,11 @@ class RepairLoopTest < Minitest::Test
 
   def validate(files)
     Calvin::Validator.call(files: files, workspace: nil, github: nil)
+  end
+
+  # Simula una rivalidazione che resta sempre sullo stesso gate rosso, senza dover far
+  # girare bin/rails test per davvero.
+  def with_stubbed_validation(fixed_result, &block)
+    with_stubbed_class_method(Calvin::Validator, :call, fixed_result, &block)
   end
 end

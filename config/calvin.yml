@@ -42,19 +42,32 @@ validation:
       - "codice esistente"
 
 # Repair loop: quando un gate è rosso, i file coinvolti tornano al modello con l'output dell'errore.
+# Non sovrascrivibile per progetto (ENGINE_ONLY in project_config.rb) — un progetto non
+# deve poter alzare il proprio budget di correzione sul codice sorgente.
 repair:
   max_attempts: 3
   max_cost_usd: 1.00      # budget per run — oltre questa soglia il repair si ferma
 
-# Feature flag — unico punto di verità (prima il kill-switch era sparso su 3 file).
-features:
-  generate_tests: false   # TestFlow/TestWriter: riattivare quando la ladder valida i test generati
+# Scrittura test per i file prodotti in un run (vedi TestGenerator). Opt-in per progetto:
+# di default disabilitato, un progetto lo attiva in .calvin/calvin.yml con
+# `test_generation: { enabled: true }`. Richiede validation.level: full, altrimenti il
+# gate focused_test non gira mai e i test generati non vengono mai eseguiti.
+#
+# max_attempts/max_cost_usd sono il budget di repair dedicato ai test rossi (vedi
+# RepairLoop#test_gate?): più basso di quello generale, così un test ostinato non
+# consuma il budget riservato al codice sorgente.
+test_generation:
+  enabled: false
+  testable_dirs: [app/services/, app/contracts/, app/jobs/]
+  max_files: 3
+  max_attempts: 2
+  max_cost_usd: 0.30
 
 sampling:
   temperature:
     explore:    0.0   # ReAct loop — deterministico: evita drift architetturale tra run identiche
     implement:  0.0   # Codegen puro — massima riproducibilità
-    test:       0.0   # TestWriter — codegen deterministico
+    test:       0.0   # TestGenerator — codegen deterministico
     pr_review:  0.0   # PrReviewFlow — deterministico
   max_tokens: 8192
 
@@ -83,11 +96,11 @@ repo:
     rails:   backend/api
     flutter: frontend/mobile
 
-# Path specifici del progetto target (synca).
-# Usati da FixturesFetcher per localizzare fixtures e test_helper.
-project:
-  fixtures_dir:     backend/api/test/fixtures
-  test_helper_path: backend/api/test/test_helper.rb
+# Path del progetto target usati da FixturesFetcher per localizzare fixtures e
+# test_helper. Sono relativi alla root del repo (non alla app root: FixturesFetcher legge
+# via GitHubClient, non via Workspace) — ogni progetto li dichiara in .calvin/calvin.yml
+# sotto `project:`. Nessun default qui: sono specifici del singolo progetto, non del motore.
+project: {}
 
 pricing:
   models:
@@ -96,10 +109,10 @@ pricing:
       output_per_million: 0.90
 
 rag:
-  # Repo target da cui sono stati ingestati i chunk nel DB vettoriale.
-  # Deve corrispondere al valore della colonna `repo` in calvin_chunks.
-  # Formato: "owner/repo" — es. "Malstrom/synca"
-  target_repo: Malstrom/synca
+  # Repo da cui sono stati ingestati i chunk nel DB vettoriale (colonna `repo` in
+  # calvin_chunks). Default: Calvin::REPO (il repo target del run corrente) — un progetto
+  # lo sovrascrive in .calvin/calvin.yml solo se i chunk usano un nome diverso.
+  target_repo: ~
 
   # I top_k restano a 1 di proposito: alzarli è un cambio di comportamento del modello e va
   # deciso con bin/eval.rb (baseline vs candidato), non a intuito. max_rules_bytes è già qui
@@ -110,9 +123,6 @@ rag:
 
   # Fase 2 — implement: regole iniettate nell'user message come ultima sezione (recency bias).
   top_k_implement: 1
-
-  # Fase 3 — test: fixtures + test_helper + rules per il file da testare.
-  top_k_test: 1
 
   # Chunk generici — predisposto per source_type futuri (scenari, docs, contratti).
   top_k_context: 5
@@ -126,4 +136,3 @@ rag:
   similarity_threshold:
     explore:    0.70
     implement:  0.70
-    test:       0.70
