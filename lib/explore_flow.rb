@@ -1,17 +1,23 @@
 # frozen_string_literal: true
 # Flusso Calvin — triggerato dalla label 'calvin'.
-# Pipeline dry-transaction con 6 step espliciti:
+# Pipeline dry-transaction con 7 step espliciti:
 #
 #   build_prompt        — ContextBuilder costruisce il prompt dal title+body dell'issue
 #   retrieve_context    — ContextRetriever: query RAG su Supabase, ritorna RetrievalResult
 #   react_loop          — ReActLoop: il modello esplora e implementa
 #   parse_files         — estrae FILE: blocks e PR_BODY
-#   validate_and_repair — Validator + RepairLoop: il codice viene eseguito prima della PR
+#   generate_tests       — TestGenerator: scrive test per i file testabili (opt-in)
+#   validate_and_repair — Validator + RepairLoop: il codice (e i test) viene eseguito prima della PR
 #   commit_and_pr       — branch + commit + PR
 #
 # validate_and_repair è il passaggio che rende la pipeline closed-loop: i file generati
 # vengono materializzati nel clone locale, passati per la ladder di gate e, se un gate è
 # rosso, rimandati al modello con l'output reale dell'errore. La PR si apre solo dopo.
+#
+# I test generati entrano nel batch PRIMA di validate_and_repair (non dopo): così
+# syntax/rubocop/gate strutturali coprono codice e test in un solo giro, e un test che
+# non passa bin/rails test (livello full) rientra nella stessa ladder di repair generica
+# — nessun meccanismo di correzione dedicato.
 #
 # Stack ("rails" | "flutter") determinato dalle label dell'issue.
 # Default letto da CONFIG[:repo][:stacks][:default].
@@ -29,6 +35,7 @@ require_relative "react_loop"
 require_relative "file_parser"
 require_relative "validator"
 require_relative "repair_loop"
+require_relative "test_generator"
 require_relative "commit_and_pr"
 
 module Calvin
@@ -39,6 +46,7 @@ module Calvin
     step :retrieve_context
     step :react_loop
     step :parse_files
+    step :generate_tests
     step :validate_and_repair
     step :commit_and_pr
 
@@ -107,7 +115,10 @@ module Calvin
       files   = FileParser.parse(content)
       pr_body = FileParser.parse_pr_body(content)
 
-      files = files.reject { |f| f[:path].start_with?("test/") } unless Calvin.feature?(:generate_tests)
+      # implement_system.md vieta al modello di scrivere test/ (li scrive Calvin stesso
+      # nello step generate_tests, se abilitato) — filtro di sicurezza indipendente dal
+      # flag, nel caso il modello lo ignori.
+      files = files.reject { |f| f[:path].start_with?("test/") }
 
       raise "nessun FILE block nell'output del modello" if files.empty?
 
@@ -130,6 +141,47 @@ module Calvin
       )
     rescue => e
       Failure(step: :parse_files, error: e.message, usage: usage, explore_turns: explore_turns)
+    end
+
+    # I test generati si aggiungono al batch PRIMA di validate_and_repair, e i loro path
+    # entrano in file_plan[:create] — altrimenti il gate strutturale
+    # check_file_plan_alignment li rifiuterebbe come "fuori dal piano" (quel gate confronta
+    # l'output col file_plan del modello, che non sa nulla dei test scritti da Calvin).
+    #
+    # Mai bloccante: un errore qui non deve mai far fallire una PR altrimenti valida —
+    # i test sono un'aggiunta, non un requisito del run.
+    def generate_tests(issue:, github:, workspace:, mistral:, files:, pr_body:, usage:,
+                       usage_explore:, temperature:, explore_turns:, file_plan:, originals:,
+                       retrieval_explore:, retrieval_implement:)
+      begin
+        reader    = RepoReader.new(workspace: workspace, github: github)
+        generated = TestGenerator.call(files: files, reader: reader, mistral: mistral)
+
+        if generated[:files].any?
+          Calvin::LOG.info "generate_tests: #{generated[:files].size} test file(s) — #{generated[:files].map { |f| f[:path] }.join(', ')}"
+          files     = files + generated[:files]
+          file_plan = file_plan.merge(create: Array(file_plan[:create]) + generated[:files].map { |f| f[:path] })
+        end
+      rescue => e
+        Calvin::LOG.warn "generate_tests: fallito (non bloccante) — #{e.class}: #{e.message}"
+      end
+
+      Success(
+        issue:                issue,
+        github:               github,
+        workspace:            workspace,
+        mistral:              mistral,
+        files:                files,
+        pr_body:              pr_body,
+        usage:                usage,
+        usage_explore:        usage_explore,
+        temperature:          temperature,
+        explore_turns:        explore_turns,
+        file_plan:            file_plan,
+        originals:            originals,
+        retrieval_explore:    retrieval_explore,
+        retrieval_implement:  retrieval_implement
+      )
     end
 
     # Quali fonti di conoscenza erano effettivamente disponibili in questo run.

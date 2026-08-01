@@ -68,10 +68,11 @@ module Calvin
     def call
       return result if @validation.ok?
 
-      max = @config[:max_attempts] || 3
+      loop do
+        max = current_max_attempts
+        break if @attempts >= max
 
-      max.times do |i|
-        @attempts = i + 1
+        @attempts += 1
         Calvin.phase_start(:repair, "attempt #{@attempts}/#{max}  gate=#{@validation.stage}")
 
         # L'evento va registrato prima di sapere l'esito: `fixed` viene aggiornato dopo la
@@ -152,7 +153,26 @@ module Calvin
       Calvin::LearningStore.record(@events, issue_number: @issue&.number)
     end
 
-    def budget_limit = @config[:max_cost_usd] || 1.0
+    # Il budget segue il gate ATTUALMENTE rosso, non quello con cui RepairLoop è partito:
+    # se un test in test/ è il problema, si usa test_generation.max_attempts/max_cost_usd
+    # (più basso) invece di repair.max_attempts/max_cost_usd — un test ostinato non deve
+    # consumare il budget riservato al codice sorgente. @attempts resta un contatore unico
+    # condiviso: se il gate cambia a metà (es. da focused_test a rubocop), il tetto
+    # applicato è quello del gate corrente, non la somma dei due.
+    def test_gate?
+      @validation.stage == :focused_test &&
+        Array(@validation.failed_paths).any? { |p| p.to_s.start_with?("test/") }
+    end
+
+    def test_config = Calvin.config[:test_generation] || {}
+
+    def current_max_attempts
+      test_gate? ? (test_config[:max_attempts] || 2) : (@config[:max_attempts] || 3)
+    end
+
+    def budget_limit
+      test_gate? ? (test_config[:max_cost_usd] || 0.30) : (@config[:max_cost_usd] || 1.0)
+    end
 
     # Costo stimato con i prezzi in config — serve solo per fermarsi, non per il report.
     def spent
