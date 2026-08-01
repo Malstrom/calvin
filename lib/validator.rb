@@ -25,6 +25,7 @@
 
 require "open3"
 require "shellwords"
+require_relative "syntax_check"
 
 module Calvin
   class Validator
@@ -164,10 +165,10 @@ module Calvin
       return nil if rb.empty?
 
       failures = rb.filter_map do |f|
-        out, status = Open3.capture2e("ruby", "-c", stdin_data: f[:content])
-        next if status.success?
+        error = Calvin::SyntaxCheck.error_for(f[:content])
+        next unless error
 
-        "#{f[:path]}:\n#{out.strip}"
+        "#{f[:path]}:\n#{error}"
       end
 
       return ok(:syntax, "#{rb.size} file(s) sintatticamente validi") if failures.empty?
