@@ -4,7 +4,6 @@
 # Interfaccia pubblica:
 #   ContextRetriever.call_for_explore(issue)      => RetrievalResult
 #   ContextRetriever.call_for_implement(file_plan) => RetrievalResult
-#   ContextRetriever.call_for_test(source_path)   => RetrievalResult
 #
 # RetrievalResult = Data.define(:rules, :context, :chunks)
 #   .rules   => String formattata con le regole attive, o nil
@@ -24,8 +23,6 @@ module Calvin
     EMBED_URL  = URI("https://api.mistral.ai/v1/embeddings")
     OPEN_TIMEOUT = 10
     READ_TIMEOUT = 20
-
-    TEST_SOURCE_TYPES = %w[fixture test_helper rule].freeze
 
     LAYER_TOKENS = %w[
       service controller migration job serializer
@@ -51,13 +48,6 @@ module Calvin
                           top_k: config_top_k(:implement, default: 20), phase: "implement")
     end
 
-    def self.call_for_test(source_path)
-      Calvin::LOG.info "ContextRetriever[test]: query=#{build_test_query(source_path).inspect}, source_types=#{TEST_SOURCE_TYPES}"
-      new.call_with_query(build_test_query(source_path),
-                          top_k: config_top_k(:test, default: 15), phase: "test",
-                          source_types: TEST_SOURCE_TYPES)
-    end
-
     # --- Costruzione query ---------------------------------------------------
 
     def self.build_issue_query(issue)
@@ -80,12 +70,6 @@ module Calvin
       query
     end
 
-    def self.build_test_query(source_path)
-      layer = extract_layer(source_path.to_s) || "code"
-      name  = extract_name(source_path.to_s)
-      "test #{layer} #{name}".strip
-    end
-
     def self.extract_layer(path)
       segments = path.to_s.split("/")
       segments.find { |s| LAYER_TOKENS.any? { |l| s.include?(l) } }
@@ -106,7 +90,7 @@ module Calvin
 
     # --- Pipeline embed + search + filter ------------------------------------
 
-    def call_with_query(query, top_k:, phase: "unknown", source_types: nil)
+    def call_with_query(query, top_k:, phase: "unknown")
       unless supabase_configured?
         Calvin::LOG.info "ContextRetriever[#{phase}]: Supabase non configurato — skip"
         return RetrievalResult.new(rules: nil, context: nil, chunks: [])
@@ -115,11 +99,9 @@ module Calvin
       Calvin::LOG.info "ContextRetriever[#{phase}]: query=#{query[0..120]}..., top_k=#{top_k}"
 
       embedding = embed(query)
-      rpc_path  = source_types ? "/rest/v1/rpc/calvin_context_search" : "/rest/v1/rpc/calvin_rules_search"
       payload   = { query_embedding: embedding, match_count: top_k, target_repo: target_repo }
-      payload[:source_types] = source_types if source_types
 
-      raw    = post_rpc(rpc_path, payload, phase)
+      raw    = post_rpc("/rest/v1/rpc/calvin_rules_search", payload, phase)
       chunks = filter_by_threshold(raw, phase)
 
       if chunks.empty?

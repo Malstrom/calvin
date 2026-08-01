@@ -5,7 +5,7 @@
 # grep_files) ma serve le richieste dal clone locale quando disponibile, ricadendo sulla
 # Contents API solo se il clone manca o se il file non è nel working tree.
 #
-# Perché esiste: il ReActLoop e il TestWriter parlano già questo protocollo. Introducendo
+# Perché esiste: il ReActLoop e il TestGenerator parlano già questo protocollo. Introducendo
 # l'adapter, passare al filesystem non richiede di toccare la logica dei tool — cambia solo
 # chi risponde.
 #

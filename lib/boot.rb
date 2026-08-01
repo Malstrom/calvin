@@ -230,11 +230,6 @@ module Calvin
     @config = ProjectConfig.load(workspace, root_workspace: root_workspace, defaults: CONFIG)
   end
 
-  # Feature flag — unico punto di verità (prima i kill-switch erano commenti sparsi nel codice).
-  def self.feature?(name)
-    (config.dig(:features, name.to_sym) || false) == true
-  end
-
   # Dry run: nessun commit, nessuna PR, nessuna scrittura su GitHub.
   # Usato da bin/eval.rb e per provare una modifica senza inquinare il repo target.
   def self.dry_run?
@@ -254,14 +249,14 @@ require_relative "context_builder"
 require_relative "file_parser"
 require_relative "pr_body_builder"
 require_relative "react_loop"
+require_relative "syntax_check"
 require_relative "validator"
 require_relative "error_signature"
 require_relative "learning_store"
 require_relative "repair_loop"
+require_relative "test_generator"
 require_relative "commit_and_pr"
 require_relative "explore_flow"
-require_relative "test_writer"
-require_relative "test_flow"
 require_relative "rubocop_runner"
 require_relative "rubocop_autocorrect"
 require_relative "run_reporter"

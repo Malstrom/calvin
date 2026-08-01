@@ -36,7 +36,7 @@ module Calvin
     ENGINE_ONLY = %i[react sampling http mistral model pricing repair routing].freeze
 
     # Chiavi che il target può definire.
-    PROJECT_KEYS = %i[stack root validation project rag features workspace test_generation].freeze
+    PROJECT_KEYS = %i[stack root validation project rag workspace test_generation].freeze
 
     # root_workspace: workspace di fallback (repo_root: "") se il file non si trova nella
     # root primaria — necessario perché la root "giusta" per .calvin/ dipende dal layout
