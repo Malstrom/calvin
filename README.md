@@ -98,8 +98,35 @@ route senza controller, `validates` nei model.
 | `refine_task` | "raffina la task" | issue aggiornata con AC, decisioni, rischi |
 | `agent_prompt` | "scrivi il prompt" | prompt strutturato per esecuzione asincrona |
 | `review_pr` | "review", numero PR | analisi PR con osservazioni |
-| `update_context` | PR mergiata | aggiornamento `.agent.yml` / `overview.yml` |
+| `update_context` | PR mergiata | aggiornamento `.agent.yml` |
 | `calvanize` | "calvanize" | bootstrap Calvin su nuovo repo target |
+
+---
+
+## Attaccare Calvin a un progetto
+
+Calvin è generico: non sa niente di un progetto finché non glielo dici. Tutto ciò che è
+specifico di un'applicazione vive in `.calvin/` **dentro il repo target**, non in Calvin.
+
+```
+il-tuo-repo/
+├── .calvin/
+│   ├── project.yml       dove sta l'app, come si lanciano i test, quali gate, pattern vietati
+│   └── conventions.md    le regole sempre attive, iniettate nel system prompt
+└── app/ …
+```
+
+Senza `.calvin/`, Calvin assume un'applicazione Rails standard (app in root, Minitest,
+`bin/rails test`) e parte lo stesso. Guida completa con esempi per Rails standard, monorepo e
+RSpec: **[docs/targeting-a-new-repo.md](docs/targeting-a-new-repo.md)**.
+
+Il confine è questo:
+
+| Livello | Contiene | Dove vive |
+|---------|----------|-----------|
+| motore | comportamento agentico, gate generici Rails | Calvin — i prompt fissi non cambiano |
+| progetto | layout, comandi, convenzioni, pattern vietati | `.calvin/` nel repo target |
+| contesto | il codice del repo, recuperato per similarity | DB vettoriale |
 
 ---
 
@@ -110,6 +137,7 @@ bin/calvin.rb               entry point
 bin/eval.rb                 eval harness — pass-rate su issue congelate (dry run)
 lib/
   boot.rb                   requires, config, logging, feature flag, dry_run?
+  project_profile.rb        .calvin/project.yml + conventions.md del repo target
   mode_router.rb            label -> mode symbol
   explore_flow.rb           ExploreFlow orchestrator (6 step)
   react_loop.rb             ReActLoop PHASE 1 + 2
@@ -135,10 +163,12 @@ config/
     implement_system.md     system prompt PHASE 2
 test/                       unit test (bundle exec rake test)
 data/evals/suite.yml        suite di eval
+docs/
+  targeting-a-new-repo.md   come collegare Calvin a un progetto Rails
+templates/calvin/           scaffold di .calvin/ da copiare nel repo target
 .rubocop.yml                stile Calvin (rubocop-rails-omakase)
 .agent.yml                  manifesto AI
 .scenarios.yml              catalogo scenari chat
-overview.yml                contesto di alto livello
 ```
 
 ## Sviluppo

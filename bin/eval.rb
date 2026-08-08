@@ -83,7 +83,15 @@ results = cases.map do |kase|
     github    = Calvin::GitHubClient.new
     issue     = github.fetch_issue(number)
     labels    = issue.labels.map(&:name)
-    repo_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last || ""
+
+    # Stessa risoluzione di bin/calvin.rb: il profilo del target decide app_root.
+    # Se l'eval usasse una risoluzione diversa dalla produzione, misurerebbe un altro Calvin.
+    profile   = Calvin::ProjectProfile.load(
+      workspace: Calvin::Workspace.new(repo_root: ""),
+      github:    github,
+      labels:    labels
+    )
+    repo_root = profile.app_root
 
     scoped    = Calvin::GitHubClient.new(repo_root: repo_root)
     workspace = Calvin::Workspace.new(repo_root: repo_root)
@@ -91,7 +99,8 @@ results = cases.map do |kase|
 
     result = Calvin::ExploreFlow.new.call(
       issue: issue, github: scoped, stack: stack,
-      workspace: workspace, mistral: Calvin::MistralClient.new
+      workspace: workspace, mistral: Calvin::MistralClient.new,
+      profile: profile
     )
 
     if result.success?

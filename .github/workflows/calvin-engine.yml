@@ -2,6 +2,10 @@ name: Calvin engine
 
 # Chiamato via workflow_call dal repo target.
 #
+# Nessun valore di questo workflow è legato a un progetto specifico: il layout del repo target
+# (dove sta l'applicazione) viene letto da `.calvin/project.yml` nel target stesso, non passato
+# come input. Un secondo repo che adotta Calvin non richiede modifiche qui.
+#
 # validation_level controlla la ladder eseguita da Calvin::Validator prima di aprire la PR:
 #   static — ruby -c, rubocop, gate strutturali (nessun ambiente Rails, job veloce)
 #   full   — aggiunge zeitwerk:check, db:migrate e i test mirati: richiede Postgres e
@@ -23,9 +27,30 @@ on:
         required: false
         type: boolean
         default: false
+      calvin_repo:
+        description: Repo che contiene il motore Calvin
+        required: false
+        type: string
+        default: Malstrom/calvin
+      database_url:
+        description: DB usato dai gate migrate/test (solo validation_level full)
+        required: false
+        type: string
+        default: postgres://postgres:postgres@localhost:5432/calvin_test
+      git_user_name:
+        required: false
+        type: string
+        default: Calvin
+      git_user_email:
+        required: false
+        type: string
+        default: calvin@users.noreply.github.com
     secrets:
+      GH_TOKEN:
+        required: false
       SYNCA_TOKEN:
-        required: true
+        description: Nome legacy di GH_TOKEN — usato se GH_TOKEN non è impostato
+        required: false
       MISTRAL_API_KEY:
         required: false
       SUPABASE_URL:
@@ -36,6 +61,9 @@ on:
 jobs:
   calvin:
     runs-on: ubuntu-latest
+
+    env:
+      TOKEN: ${{ secrets.GH_TOKEN || secrets.SYNCA_TOKEN }}
 
     # Postgres serve ai gate db:migrate e focused_test (validation_level: full).
     services:
@@ -57,8 +85,8 @@ jobs:
       - name: Checkout calvin
         uses: actions/checkout@v4
         with:
-          repository: Malstrom/calvin
-          token: ${{ secrets.SYNCA_TOKEN }}
+          repository: ${{ inputs.calvin_repo }}
+          token: ${{ env.TOKEN }}
           path: calvin
 
       # 2. Clona il repo target — è anche il workspace su cui Calvin legge e valida
@@ -66,14 +94,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.target_repo }}
-          token: ${{ secrets.SYNCA_TOKEN }}
+          token: ${{ env.TOKEN }}
           path: target
 
       # 3. Git identity
       - name: Configure git identity
         run: |
-          git config --global user.email "calvin@synca.app"
-          git config --global user.name "Calvin"
+          git config --global user.email "${{ inputs.git_user_email }}"
+          git config --global user.name "${{ inputs.git_user_name }}"
 
       # 4. Ruby + gem di Calvin
       - uses: ruby/setup-ruby@v1
@@ -84,21 +112,34 @@ jobs:
         run: bundle install
         working-directory: calvin/bin
 
-      # 5. Dipendenze del repo target — solo per i gate full
+      # 5. Dove sta l'applicazione dentro il repo target.
+      #    Unica fonte di verità: .calvin/project.yml nel target. Se manca, l'app è in root.
+      - name: Resolve app root from target profile
+        run: |
+          APP_ROOT=$(ruby -ryaml -e '
+            path = "target/.calvin/project.yml"
+            root = File.exist?(path) ? (YAML.safe_load_file(path, aliases: true) || {})["app_root"].to_s : ""
+            print root.sub(%r{/\z}, "")
+          ')
+          echo "APP_ROOT=$APP_ROOT" >> "$GITHUB_ENV"
+          echo "TARGET_APP_DIR=$([ -n "$APP_ROOT" ] && echo "target/$APP_ROOT" || echo "target")" >> "$GITHUB_ENV"
+          echo "app root: '${APP_ROOT:-(repo root)}'"
+
+      # 6. Dipendenze del repo target — solo per i gate full
       - name: Install target dependencies
         if: inputs.validation_level == 'full'
         run: bundle install
-        working-directory: target/backend/api
+        working-directory: ${{ env.TARGET_APP_DIR }}
 
       - name: Prepare target test database
         if: inputs.validation_level == 'full'
         run: bin/rails db:prepare
-        working-directory: target/backend/api
+        working-directory: ${{ env.TARGET_APP_DIR }}
         env:
           RAILS_ENV: test
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/synca_test
+          DATABASE_URL: ${{ inputs.database_url }}
 
-      # 6. Esegue Calvin
+      # 7. Esegue Calvin
       - name: Run Calvin
         run: bundle exec ruby $GITHUB_WORKSPACE/calvin/bin/calvin.rb
         working-directory: target
@@ -106,13 +147,12 @@ jobs:
           BUNDLE_GEMFILE: ${{ github.workspace }}/calvin/bin/Gemfile
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           GITHUB_REPOSITORY: ${{ inputs.target_repo }}
-          GITHUB_TOKEN: ${{ secrets.SYNCA_TOKEN }}
+          GITHUB_TOKEN: ${{ env.TOKEN }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          CALVIN_MODEL: codestral-latest
           CALVIN_TARGET_PATH: ${{ github.workspace }}/target
           CALVIN_VALIDATION_LEVEL: ${{ inputs.validation_level }}
           CALVIN_DRY_RUN: ${{ inputs.dry_run }}
           RAILS_ENV: test
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/synca_test
+          DATABASE_URL: ${{ inputs.database_url }}

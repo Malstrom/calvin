@@ -46,6 +46,13 @@ repair:
   max_attempts: 3
   max_cost_usd: 1.00      # budget per run — oltre questa soglia il repair si ferma
 
+# Convenzioni del progetto target: .calvin/conventions.md nel repo target, iniettato
+# integralmente nel system prompt. È il posto dove vivono le regole SEMPRE valide di un
+# progetto (prima erano scritte dentro config/prompts/rails/explore_system.md, cioè dentro
+# Calvin, cioè valide per un solo repo).
+conventions:
+  max_bytes: 8192   # oltre questa soglia il file viene troncato con un warning
+
 # Feature flag — unico punto di verità (prima il kill-switch era sparso su 3 file).
 features:
   generate_tests: false   # TestFlow/TestWriter: riattivare quando la ladder valida i test generati
@@ -79,15 +86,21 @@ repo:
   stacks:
     known:   [rails, flutter]
     default: rails
+
+  # LEGACY — da rimuovere quando tutti i target avranno `.calvin/project.yml`.
+  # Dove si trova l'applicazione dentro il repo target ora lo dichiara il target stesso, in
+  # `.calvin/project.yml` (`app_root`). Questa mappa label→root resta solo come rete per i
+  # repo non ancora migrati: viene consultata unicamente se project.yml manca.
   roots:
     rails:   backend/api
     flutter: frontend/mobile
 
-# Path specifici del progetto target (synca).
-# Usati da FixturesFetcher per localizzare fixtures e test_helper.
+# Path usati da FixturesFetcher, relativi alla radice del repo target.
+# LEGACY: FixturesFetcher è orfano (nessun chiamante dopo la rimozione di bin/ingest_fixtures.rb)
+# e viene eliminato nello step 2 insieme al resto della vecchia pipeline di ingestion.
 project:
-  fixtures_dir:     backend/api/test/fixtures
-  test_helper_path: backend/api/test/test_helper.rb
+  fixtures_dir:     test/fixtures
+  test_helper_path: test/test_helper.rb
 
 pricing:
   models:
@@ -96,10 +109,10 @@ pricing:
       output_per_million: 0.90
 
 rag:
-  # Repo target da cui sono stati ingestati i chunk nel DB vettoriale.
-  # Deve corrispondere al valore della colonna `repo` in calvin_chunks.
-  # Formato: "owner/repo" — es. "Malstrom/synca"
-  target_repo: Malstrom/synca
+  # Repo di cui cercare i chunk nel DB vettoriale — deve corrispondere alla colonna `repo`
+  # in calvin_chunks. Vuoto = il repo target del run (GITHUB_REPOSITORY), che è quasi sempre
+  # ciò che si vuole. Valorizzarlo solo se i chunk sono indicizzati sotto un altro nome.
+  target_repo: ~
 
   # I top_k restano a 1 di proposito: alzarli è un cambio di comportamento del modello e va
   # deciso con bin/eval.rb (baseline vs candidato), non a intuito. max_rules_bytes è già qui

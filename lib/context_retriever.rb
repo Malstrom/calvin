@@ -142,9 +142,14 @@ module Calvin
       ENV["SUPABASE_URL"] && ENV["SUPABASE_SERVICE_KEY"]
     end
 
+    # Il repo di cui cercare i chunk. È il repo target del run, quindi si legge a runtime:
+    # inchiodarlo in config/calvin.yml (com'era: `rag.target_repo: Malstrom/synca`) legava
+    # l'intero DB vettoriale a un solo progetto.
+    # L'override in config resta possibile per i casi in cui i chunk sono indicizzati sotto
+    # un nome diverso da GITHUB_REPOSITORY.
     def target_repo
-      Calvin::CONFIG.dig(:rag, :target_repo) or
-        raise "rag.target_repo non configurato in config/calvin.yml"
+      Calvin::CONFIG.dig(:rag, :target_repo) || Calvin::REPO or
+        raise "repo target non determinabile: né rag.target_repo né GITHUB_REPOSITORY"
     end
 
     def similarity_threshold(phase)

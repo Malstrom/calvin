@@ -5,23 +5,29 @@
 #
 #   FASE 1 — EXPLORE (multi-turn)
 #     Il modello esplora il repo tramite tool calls JSON.
-#     system: config/prompts/{stack}/explore_system.md + rules iniettate prima di # Examples
-#     Termina quando il modello chiama done() o si raggiunge MAX_TURNS.
-#     temperature: sampling.temperature.explore (default 0.1)
+#     Termina quando il modello chiama done() o si raggiunge react.max_turns.
+#     temperature: sampling.temperature.explore
 #     RAG: Calvin::ContextRetriever.call_for_explore(issue) — query da title+body
-#          top_k: rag.top_k_explore (default 10)
 #
 #   FASE 2 — IMPLEMENT (singola chiamata separata)
-#     system[0]: config/prompts/{stack}/implement_system.md (formato/output)
-#     system[1]: ## Rules (RAG chunks) — secondo system message dedicato.
-#                Più autorità del user message. Usato se chunks disponibili.
-#     user:      ## Task + observations categorizzate (senza ## Rules)
+#     user: ## Task + observations categorizzate
 #     Usa retrieval_implement (query dai path) se disponibile, altrimenti
 #     fallback su retrieval_explore (query dall'issue).
-#     temperature: sampling.temperature.implement (default 0.0)
+#     temperature: sampling.temperature.implement
 #     RAG: Calvin::ContextRetriever.call_for_implement(file_plan) — query dai path file
-#          top_k: rag.top_k_implement (default 20)
 #          Chiamato subito dopo done() — quando il file_plan è noto.
+#
+# Stratificazione dei system message, uguale in entrambe le fasi e per autorità crescente:
+#
+#   [system 0] config/prompts/{stack}/*_system.md   comportamento agentico — fisso, di Calvin
+#   [system 1] .calvin/conventions.md               regole sempre attive — del repo target
+#   [system 2] chunk RAG                            contesto recuperato per similarity
+#   [user]     task + osservazioni
+#
+# Gli strati 1 e 2 vengono dal progetto, non da Calvin: è ciò che permette al prompt fisso
+# di restare fisso e a Calvin di lavorare su qualunque applicazione Rails.
+# Tutti i valori numerici stanno in config/calvin.yml — non duplicarli in questo commento,
+# è già successo che divergessero.
 #
 # Tool disponibili durante l'esplorazione:
 #   read_file(path)              -> contenuto file o errore
@@ -57,10 +63,11 @@ module Calvin
     # mistral: iniettabile — il flow ne ha già un'istanza e i test ne passano un doppio,
     # invece di dover stubbare MistralClient.new.
     def initialize(reader, issue_prompt, stack: "rails", retrieval: nil, issue_number: nil,
-                   mistral: nil)
+                   mistral: nil, profile: nil)
       @reader       = reader
       @issue_prompt = issue_prompt
       @stack        = stack
+      @profile      = profile || Calvin::ProjectProfile.default
 
       run_id       = Process.pid
       issue_ref    = issue_number || "unknown"
@@ -114,30 +121,49 @@ module Calvin
 
     private
 
+    # I messaggi sono stratificati per autorità crescente, e ogni strato ha una sorgente
+    # diversa. Prima le regole del progetto venivano spliciate DENTRO il prompt fisso
+    # (`base.sub("# Examples", ...)`), il che rendeva impossibile tenere fisso il prompt fisso:
+    # ogni convenzione nuova era una modifica a un file di Calvin.
+    #
+    #   [system 0] prompt fisso Calvin      — comportamento agentico, non cambia mai
+    #   [system 1] .calvin/conventions.md   — regole sempre attive del progetto target
+    #   [system 2] chunk RAG                — contesto recuperato per similarity
+    #   [user]     task
     def setup_messages
-      explore_system = build_explore_system
-      Calvin::LOG.info "explore_system  #{(explore_system.bytesize / 1024.0).round(1)} KB"
-      @messages = [
-        { role: "system", content: explore_system },
-        { role: "user",   content: @issue_prompt }
-      ]
+      base = load_prompt("explore_system.md")
+      Calvin::LOG.info "explore_system  #{(base.bytesize / 1024.0).round(1)} KB"
+
+      @messages = [{ role: "system", content: base }]
+
+      if (conventions = conventions_message)
+        @messages << { role: "system", content: conventions }
+      end
+
+      if @retrieval_explore.rules
+        @messages << { role: "system", content: retrieved_rules_message(@retrieval_explore.rules) }
+      end
+
+      @messages << { role: "user", content: @issue_prompt }
     end
 
     # ---------------------------------------------------------------------------
     # Prompt assembly
     # ---------------------------------------------------------------------------
 
-    def build_explore_system
-      base = load_prompt("explore_system.md")
-      return base unless @retrieval_explore.rules
+    # Le convenzioni del progetto target, iniettate integralmente e in modo deterministico.
+    # Non passano dal retrieval: una regola architetturale fondamentale non può dipendere da
+    # una similarity search che a volte la restituisce e a volte no.
+    def conventions_message
+      return nil unless @profile.conventions?
 
-      rules_section = "# Active rules — consult these while deciding which files to read\n\n#{@retrieval_explore.rules}\n"
+      Calvin::LOG.info "conventions  #{(@profile.conventions.bytesize / 1024.0).round(1)} KB → system message"
+      "# Project conventions — this project's rules, they override your general instincts\n\n" \
+        "#{@profile.conventions}\n"
+    end
 
-      if base.include?("# Examples")
-        base.sub("# Examples", "#{rules_section}\n# Examples")
-      else
-        base + "\n\n#{rules_section}"
-      end
+    def retrieved_rules_message(rules)
+      "# Retrieved context — consult while deciding which files to read\n\n#{rules}\n"
     end
 
     def build_implement_system
@@ -326,6 +352,10 @@ module Calvin
     def build_implement_messages
       messages = []
       messages << { role: "system", content: build_implement_system }
+
+      if (conventions = conventions_message)
+        messages << { role: "system", content: conventions }
+      end
 
       active_retrieval = @retrieval_implement.chunks.any? ? @retrieval_implement : @retrieval_explore
       chunks = active_retrieval.chunks

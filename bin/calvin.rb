@@ -19,10 +19,17 @@ temp_github = Calvin::GitHubClient.new
 
 issue  = temp_github.fetch_issue(ENV.fetch("ISSUE_NUMBER").to_i)
 labels = issue.labels.map(&:name)
-
-repo_root = Calvin::REPO_ROOTS.find { |label, _| labels.include?(label) }&.last || ""
 Calvin::LOG.info "labels: #{labels.join(', ')}"
-Calvin::LOG.info "repo_root: #{repo_root.empty? ? '(none)' : repo_root}"
+
+# Il profilo sta in `.calvin/` alla RADICE del repo target, non dentro l'applicazione:
+# è proprio lui a dire dove l'applicazione si trova. Quindi si legge da un workspace sulla
+# radice, e solo dopo si costruiscono workspace e client scopati su app_root.
+profile   = Calvin::ProjectProfile.load(
+  workspace: Calvin::Workspace.new(repo_root: ""),
+  github:    temp_github,
+  labels:    labels
+)
+repo_root = profile.app_root
 
 github    = Calvin::GitHubClient.new(repo_root: repo_root)
 mistral   = Calvin::MistralClient.new
@@ -42,7 +49,8 @@ in :explore_issue
     github:    github,
     stack:     stack,
     workspace: workspace,
-    mistral:   mistral
+    mistral:   mistral,
+    profile:   profile
   )
   Calvin::PostSteps.run(
     result,

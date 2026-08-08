@@ -44,36 +44,39 @@ module Calvin
 
     private
 
-    def build_prompt(issue:, stack:, github:, workspace: nil, mistral: nil)
+    def build_prompt(issue:, stack:, github:, workspace: nil, mistral: nil, profile: nil)
       Calvin.banner("EXPLORE FLOW  •  issue ##{issue.number}", emoji: "🚀")
       reader = RepoReader.new(workspace: workspace, github: github)
       Calvin::LOG.info "repo source: #{reader.source}#{reader.local? ? " (#{workspace.root})" : ''}"
 
+      profile ||= Calvin::ProjectProfile.default
+
       prompt = ContextBuilder.build(issue, reader: reader)
       Calvin::LOG.info "prompt built  #{(prompt.bytesize / 1024.0).round(1)} KB"
       Success(issue: issue, stack: stack, github: github, workspace: workspace,
-              mistral: mistral, reader: reader, prompt: prompt)
+              mistral: mistral, profile: profile, reader: reader, prompt: prompt)
     rescue => e
       Failure(step: :build_prompt, error: e.message, usage: nil, explore_turns: 0)
     end
 
-    def retrieve_context(issue:, stack:, github:, workspace:, mistral:, reader:, prompt:)
+    def retrieve_context(issue:, stack:, github:, workspace:, mistral:, profile:, reader:, prompt:)
       Calvin.section("RAG retrieve")
       retrieval = ContextRetriever.call(issue)
       kb = retrieval.rules ? (retrieval.rules.bytesize / 1024.0).round(1) : 0
       Calvin::LOG.info "rules #{kb} KB  |  #{retrieval.chunks.size} chunks"
       Success(issue: issue, stack: stack, github: github, workspace: workspace, mistral: mistral,
-              reader: reader, prompt: prompt, retrieval: retrieval)
+              profile: profile, reader: reader, prompt: prompt, retrieval: retrieval)
     rescue => e
       Calvin::LOG.warn "ContextRetriever failed (#{e.message}) — continuing without rules"
       empty = RetrievalResult.new(rules: nil, context: nil, chunks: [])
       Success(issue: issue, stack: stack, github: github, workspace: workspace, mistral: mistral,
-              reader: reader, prompt: prompt, retrieval: empty)
+              profile: profile, reader: reader, prompt: prompt, retrieval: empty)
     end
 
-    def react_loop(issue:, stack:, github:, workspace:, mistral:, reader:, prompt:, retrieval:)
+    def react_loop(issue:, stack:, github:, workspace:, mistral:, profile:, reader:, prompt:, retrieval:)
       loop_obj = ReActLoop.new(reader, prompt, stack: stack, retrieval: retrieval,
-                                              issue_number: issue.number, mistral: mistral)
+                                              issue_number: issue.number, mistral: mistral,
+                                              profile: profile)
       result   = loop_obj.run
 
       exp_c = result[:retrieval_explore].chunks.size
@@ -86,6 +89,7 @@ module Calvin
         github:               github,
         workspace:            workspace,
         mistral:              mistral,
+        profile:              profile,
         content:              result[:content],
         usage:                result[:usage],
         usage_explore:        result[:usage_explore],
@@ -100,8 +104,8 @@ module Calvin
       Failure(step: :react_loop, error: e.message, usage: nil, explore_turns: 0)
     end
 
-    def parse_files(issue:, stack:, github:, workspace:, mistral:, content:, usage:, usage_explore:,
-                    temperature:, explore_turns:, file_plan:, originals:,
+    def parse_files(issue:, stack:, github:, workspace:, mistral:, profile:, content:, usage:,
+                    usage_explore:, temperature:, explore_turns:, file_plan:, originals:,
                     retrieval_explore:, retrieval_implement:)
       files   = FileParser.parse(content)
       pr_body = FileParser.parse_pr_body(content)
@@ -116,6 +120,7 @@ module Calvin
         github:               github,
         workspace:            workspace,
         mistral:              mistral,
+        profile:              profile,
         files:                files,
         pr_body:              pr_body,
         usage:                usage,
@@ -135,15 +140,15 @@ module Calvin
     # repair, il comportamento dipende da validation.open_pr_when_red:
     #   true  → la PR si apre marcata (label + errori nel body), ispezionabile a mano
     #   false → nessuna PR, l'errore torna come Failure e finisce sull'issue
-    def validate_and_repair(issue:, github:, workspace:, mistral:, files:, pr_body:, usage:,
-                            usage_explore:, temperature:, explore_turns:, file_plan:, originals:,
-                            retrieval_explore:, retrieval_implement:)
+    def validate_and_repair(issue:, github:, workspace:, mistral:, profile:, files:, pr_body:,
+                            usage:, usage_explore:, temperature:, explore_turns:, file_plan:,
+                            originals:, retrieval_explore:, retrieval_implement:)
       config = Calvin::CONFIG[:validation] || {}
       Calvin.phase_start(:validate, "level=#{config[:level] || 'static'}  #{files.size} file(s)")
 
       validation = Validator.call(
         files: files, workspace: workspace, github: github,
-        file_plan: file_plan, originals: originals, issue: issue
+        file_plan: file_plan, originals: originals, issue: issue, profile: profile
       )
 
       repair_attempts = 0
@@ -152,7 +157,8 @@ module Calvin
       if validation.red?
         repaired = RepairLoop.call(
           files: files, validation: validation, workspace: workspace, github: github,
-          mistral: mistral, file_plan: file_plan, originals: originals, issue: issue
+          mistral: mistral, file_plan: file_plan, originals: originals, issue: issue,
+          profile: profile
         )
         files           = repaired[:files]
         validation      = repaired[:validation]

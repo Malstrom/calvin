@@ -106,13 +106,32 @@ class ValidatorTest < Minitest::Test
 
   # ── gate strutturali ──────────────────────────────────────────────────────────
 
-  def test_rejects_validates_in_model
+  # La regola "niente validates nei model" è di synca, non di Rails: ora la dichiara il
+  # progetto in .calvin/project.yml e il Validator la applica senza conoscerla.
+  MODEL_VALIDATES_RULE = [{
+    paths:   "app/models/**",
+    pattern: '^\s*validates?\s',
+    message: "i model del progetto sono strutture dati"
+  }].freeze
+
+  def test_rejects_forbidden_pattern_declared_by_the_project
+    files = [{ path: "app/models/user.rb", content: "class User < ApplicationRecord\n  validates :email, presence: true\nend\n" }]
+
+    result = validate(files, profile: profile_with(MODEL_VALIDATES_RULE))
+
+    refute result.ok?
+    assert_equal :structural, result.stage
+    assert_includes result.output, "strutture dati"
+  end
+
+  # Il contraltare, ed è il punto dello step: lo stesso file su un progetto che non dichiara
+  # quella regola passa. Prima veniva bocciato comunque, perché la regola era nel motore.
+  def test_accepts_validates_when_the_project_does_not_forbid_it
     files = [{ path: "app/models/user.rb", content: "class User < ApplicationRecord\n  validates :email, presence: true\nend\n" }]
 
     result = validate(files)
 
-    refute result.ok?
-    assert_includes result.output, "strutture dati"
+    assert result.ok?, "atteso verde su un progetto senza forbidden_patterns, ottenuto #{result.stage}: #{result.output}"
   end
 
   def test_rejects_route_without_controller
@@ -213,8 +232,13 @@ class ValidatorTest < Minitest::Test
 
   # Valida senza workspace (solo gate statici) — rubocop viene saltato perché senza
   # github non c'è config del repo target da applicare.
-  def validate(files, originals: {}, file_plan: nil)
+  def validate(files, originals: {}, file_plan: nil, profile: nil)
     Calvin::Validator.call(files: files, workspace: nil, github: nil,
-                           originals: originals, file_plan: file_plan)
+                           originals: originals, file_plan: file_plan, profile: profile)
+  end
+
+  # Profilo con una regola dichiarata dal progetto, come se venisse da .calvin/project.yml.
+  def profile_with(forbidden_patterns)
+    Calvin::ProjectProfile.new(data: { forbidden_patterns: forbidden_patterns })
   end
 end
