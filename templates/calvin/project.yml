@@ -1,0 +1,67 @@
+# .calvin/project.yml — il profilo che il repo target dà a Calvin.
+#
+# Copiare questo file in `.calvin/project.yml` alla RADICE del repo (non dentro l'app) e
+# adattarlo. Ogni chiave è opzionale: senza questo file Calvin assume un'applicazione Rails
+# standard con l'app in root, Minitest e i comandi `bin/rails` di serie.
+#
+# Questo file dice a Calvin com'è fatto il progetto. Le regole di stile e architettura vanno
+# invece in `.calvin/conventions.md`, che finisce nel prompt del modello.
+
+# Dove si trova l'applicazione Rails dentro il repo.
+# "" (o chiave assente) = l'app è nella radice del repo.
+# In un monorepo, il path della cartella dell'app: es. "backend/api".
+# Tutti i path che Calvin legge e scrive sono relativi a questa root.
+app_root: ""
+
+test:
+  # Informativo, per i prompt. minitest | rspec
+  framework: minitest
+
+  # Comando base per eseguire i test, lanciato dalla root dell'applicazione.
+  # Calvin ci accoda i path dei test mirati per il gate focused_test.
+  command: bin/rails test
+
+  # Come si deriva il path del test dal path del sorgente.
+  # Lista di regole, vince la prima che matcha; `from` è una regex ancorata su tutto il path,
+  # `to` una stringa di sostituzione. Un sorgente che non matcha nessuna regola è "non
+  # testabile" e Calvin non gli cerca né gli scrive test.
+  path_map:
+    - from: 'app/(.*)\.rb'
+      to:   'test/\1_test.rb'
+    # Per un progetto a RSpec:
+    # - from: 'app/(.*)\.rb'
+    #   to:   'spec/\1_spec.rb'
+    #
+    # Per testare solo alcuni layer, dichiarare solo quelli:
+    # - from: 'app/(services|jobs)/(.*)\.rb'
+    #   to:   'test/\1/\2_test.rb'
+
+# Comandi dei gate della validation ladder (eseguiti solo con validation_level: full).
+# Stringa vuota o chiave omessa con valore vuoto = gate non applicabile a questo progetto,
+# viene saltato invece di fallire.
+gates:
+  zeitwerk: bin/rails zeitwerk:check
+  migrate:  bin/rails db:migrate
+
+# Pattern che questo progetto vieta. Sono controlli deterministici: una regola verificabile
+# a macchina non va scritta in prosa nel prompt, dove il modello può ignorarla.
+#
+#   paths:   glob sul path del file (`**` attraversa le directory)
+#   pattern: regex Ruby cercata nel contenuto del file generato
+#   message: cosa viene detto al modello quando la regola scatta
+forbidden_patterns: []
+  # Esempio — un progetto in cui i model sono strutture dati senza logica:
+  # - paths: "app/models/**"
+  #   pattern: '^\s*validates?\s'
+  #   message: "i model del progetto sono strutture dati: la validazione sta nei contract"
+
+# Cosa indicizzare nel DB vettoriale (usato dall'indicizzazione del codice).
+index:
+  include:
+    - "app/**/*.rb"
+    - "lib/**/*.rb"
+    - "config/routes.rb"
+    - "test/**/*.rb"
+  exclude:
+    - "db/schema.rb"
+    - "**/vendor/**"

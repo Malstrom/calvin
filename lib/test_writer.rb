@@ -28,20 +28,15 @@ module Calvin
     include Dry::Monads[:result]
     extend self
 
-    TESTABLE_DIRS = %w[app/services/ app/contracts/ app/jobs/].freeze
-
     # Deriva il path del test file dal path del sorgente.
     # es. app/services/magic_link_service.rb → test/services/magic_link_service_test.rb
-    # Ritorna nil se il sorgente non è testabile.
-    def test_path_for(source_path)
-      TESTABLE_DIRS.each do |dir|
-        next unless source_path.start_with?(dir)
-
-        type = dir.split("/").last
-        name = File.basename(source_path, ".rb")
-        return "test/#{type}/#{name}_test.rb"
-      end
-      nil
+    # Ritorna nil se il sorgente non è testabile per questo progetto.
+    #
+    # La mappa la definisce il repo target in `.calvin/project.yml` (`test.path_map`), non
+    # Calvin: prima era la costante TESTABLE_DIRS = [app/services/, app/contracts/, app/jobs/],
+    # cioè i layer di synca, che su un altro progetto avrebbe dichiarato non testabile tutto.
+    def test_path_for(source_path, profile: nil)
+      (profile || Calvin::ProjectProfile.default).test_path_for(source_path)
     end
 
     def call(source_path, github:, mistral:)

@@ -56,3 +56,10 @@ scenarios:
       - user references a PR number and wants to learn from it
       - user wants to post a calvin:rules comment on a PR
     file: scenarios/extract_rules.yml
+
+  - id: update_context
+    triggers:
+      - a PR has been merged and the project context needs updating
+      - user says "aggiorna il contesto", "update context"
+      - user wants .calvin/ on the target repo refreshed after a merge
+    file: scenarios/update_context.yml

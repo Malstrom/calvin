@@ -48,7 +48,7 @@ module Calvin
     def self.call(**kwargs) = new(**kwargs).call
 
     def initialize(files:, validation:, workspace:, mistral:, github: nil,
-                   file_plan: nil, originals: {}, issue: nil)
+                   file_plan: nil, originals: {}, issue: nil, profile: nil)
       @files      = Array(files)
       @validation = validation
       @workspace  = workspace
@@ -57,6 +57,7 @@ module Calvin
       @file_plan  = file_plan
       @originals  = originals || {}
       @issue      = issue
+      @profile    = profile || Calvin::ProjectProfile.default
       @config     = Calvin::CONFIG[:repair] || {}
       @usage      = { "prompt_tokens" => 0, "completion_tokens" => 0, "total_tokens" => 0 }
       @attempts   = 0
@@ -91,7 +92,8 @@ module Calvin
           github:    @github,
           file_plan: @file_plan,
           originals: @originals,
-          issue:     @issue
+          issue:     @issue,
+          profile:   @profile
         )
 
         if @validation.ok?

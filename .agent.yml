@@ -25,6 +25,21 @@ role: dev assistant for Calvin — works in chat with Igor to write and refine e
 architecture:
   entry_point: bin/calvin.rb
   routing: ModeRouter.for_labels(labels) → mode symbol
+  separation_of_concerns: >
+    Calvin è generico. Tutto ciò che è specifico di un progetto vive in .calvin/ nel repo
+    target: project.yml (app_root, comandi test, gate, forbidden_patterns) e conventions.md
+    (regole sempre attive, iniettate nel system prompt). Una regola di progetto non va MAI
+    scritta in config/prompts/ — quello è il motore, e vale per tutti i target.
+  project_profile:
+    class: Calvin::ProjectProfile
+    reads: [.calvin/project.yml, .calvin/conventions.md]
+    loaded_from: workspace sulla RADICE del repo (app_root è ciò che si sta scoprendo)
+    fallback: default Rails generici + legacy repo.roots per label se project.yml manca
+  system_message_layering:
+    - "[system 0] config/prompts/{stack}/*_system.md — comportamento agentico, fisso"
+    - "[system 1] .calvin/conventions.md — regole sempre attive del target"
+    - "[system 2] chunk RAG — contesto recuperato per similarity"
+    - "[user] task + osservazioni"
   modes:
     explore_issue: label calvin on synca issue
     unknown: exit(1)
@@ -38,8 +53,8 @@ architecture:
       - CommitAndPr
       - PostSteps
     react_loop:
-      phase_1: explore_system.md — multi-turn, tools: read_file / list_dir / grep / done
-      phase_2: implement_system.md — single call, FILE: blocks + PR_BODY
+      phase_1: "explore_system.md — multi-turn, tools: read_file / list_dir / grep / done"
+      phase_2: "implement_system.md — single call, FILE: blocks + PR_BODY"
       reads_from: RepoReader — clone locale (Workspace) con fallback Contents API
     validation:
       ladder: [syntax, rubocop, structural, zeitwerk, migrate, focused_test, full_test]
@@ -51,7 +66,7 @@ architecture:
         - file_plan vs output — nessun FILE block fuori piano, nessun path pianificato mancante
         - timestamp migration maggiore dell'ultima esistente
         - ogni route nuova ha un controller esistente o nel piano
-        - nessun validates/validate sotto app/models
+        - forbidden_patterns dichiarati dal target in .calvin/project.yml
       rubocop_gate: solo offese NON correggibili — le correggibili le sistema RubocopAutocorrect
       on_red: RepairLoop (repair.max_attempts) → se resta rosso, PR con label calvin:red
     post_steps:
@@ -68,6 +83,7 @@ repo_structure:
   bin/calvin.rb: entry point — ModeRouter routing, case/in on mode, PostSteps.run
   bin/eval.rb: eval harness — pass-rate su issue congelate, sempre in dry run
   lib/boot.rb: requires, Calvin::CONFIG, logging, REPO_ROOTS, Calvin.feature?, Calvin.dry_run?
+  lib/project_profile.rb: Calvin::ProjectProfile — .calvin/project.yml + conventions.md del target
   lib/workspace.rb: I/O sul clone locale del target (read/list/grep/write), path sandboxed
   lib/repo_reader.rb: adapter di lettura — clone locale con fallback Contents API
   lib/validator.rb: validation ladder + gate strutturali — ritorna Validator::Result
@@ -78,7 +94,7 @@ repo_structure:
   lib/react_loop.rb: ReActLoop — multi-turn explore + single implement call
   lib/explore_flow.rb: ExploreFlow orchestrator
   lib/context_builder.rb: builds issue prompt string
-  lib/file_parser.rb: parses FILE: blocks from LLM output
+  lib/file_parser.rb: "parses FILE: blocks from LLM output"
   lib/commit_and_pr.rb: commits parsed files + opens PR on synca
   lib/mistral_client.rb: HTTP client for Mistral API
   lib/github_client.rb: GitHub API wrapper
@@ -87,8 +103,10 @@ repo_structure:
   lib/run_reporter.rb: appends run stats to runs.csv + runs.md
   lib/pr_body_builder.rb: extracts PR_BODY_START…PR_BODY_END from LLM output
   config/calvin.yml: ALL runtime constants
-  config/prompts/rails/explore_system.md: system prompt PHASE 1
-  config/prompts/rails/implement_system.md: system prompt PHASE 2
+  config/prompts/rails/explore_system.md: system prompt PHASE 1 — generico, senza dominio
+  config/prompts/rails/implement_system.md: system prompt PHASE 2 — generico, senza dominio
+  templates/calvin/: scaffold di .calvin/ da copiare nel repo target
+  docs/targeting-a-new-repo.md: come collegare Calvin a un progetto Rails
 
 prompt_files:
   explore_system.md:
@@ -100,10 +118,15 @@ prompt_files:
     used_in: ReActLoop PHASE 2
     critical:
       - rule order matters — Mistral weights end of prompt (recency bias)
-      - "except models" is in Output format section, adjacent to "tests are mandatory"
-      - domain rules: migration version, enum-only models, contract validation, controller pattern (case/in), service monads, fixture safety
+      - >
+        NON contiene regole di dominio: sono uscite nello step 1 e vivono in
+        .calvin/conventions.md nel repo target. Non reintrodurle qui.
 
 target_repo:
+  note: >
+    Il target di riferimento oggi è synca, ma Calvin non ne dipende più: layout e convenzioni
+    arrivano da .calvin/ nel repo target. synca non ha ancora .calvin/project.yml e gira sul
+    fallback legacy repo.roots.
   name: synca
   owner: Malstrom
   calvin_files:
@@ -121,10 +144,12 @@ working_principles:
   - always read the relevant file before modifying it (get SHA for updates)
   - when fixing a prompt, critical rules go LAST (recency bias)
   - if a rule can be verified deterministically, put it in Validator — not in a prompt
+  - a project rule NEVER goes in config/prompts/ — it goes in .calvin/ on the target repo
+  - config/prompts/ describes how to be an agent, never how one specific app is built
   - every pure function gets a unit test in test/ (bundle exec rake test must stay green)
   - prompt/config changes that affect model behaviour go through bin/eval.rb, not intuition
   - CSV rows must always be padded to CSV_HEADER.size columns
-  - when Calvin generates model tests in a PR, delete them and fix implement_system.md
+  - when Calvin generates model tests in a PR, delete them and fix .calvin/conventions.md on the target
   - never merge PRs without Igor confirmation
   - routing lives in ModeRouter — never add label checks in bin/calvin.rb
   - all configuration constants live in calvin.yml — never hardcode values in Ruby
@@ -146,6 +171,12 @@ known_issues:
   calvin_fix_removed:
     status: completed 2026-07-08
     summary: PrReviewFlow and calvin-fix label removed — only explore_issue flow remains
+  engine_coupled_to_synca:
+    status: fixed — step 1
+    summary: >
+      Le convenzioni di synca stavano nei prompt fissi e dentro validator.rb
+      (check_model_validations). Estratte in .calvin/project.yml + conventions.md nel repo
+      target; introdotto Calvin::ProjectProfile; explore_system.md da 200 a 111 righe.
 
 scenarios:
   spec: .scenarios.yml

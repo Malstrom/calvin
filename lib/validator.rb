@@ -38,13 +38,15 @@ module Calvin
 
     def self.call(**kwargs) = new(**kwargs).call
 
-    def initialize(files:, workspace:, github: nil, file_plan: nil, originals: {}, issue: nil)
+    def initialize(files:, workspace:, github: nil, file_plan: nil, originals: {}, issue: nil,
+                   profile: nil)
       @files     = Array(files)
       @workspace = workspace
       @github    = github
       @file_plan = file_plan || { modify: [], create: [], reference: [] }
       @originals = originals || {}
       @issue     = issue
+      @profile   = profile || Calvin::ProjectProfile.default
       @config    = Calvin::CONFIG[:validation] || {}
     end
 
@@ -135,10 +137,10 @@ module Calvin
       when :syntax       then gate_syntax
       when :rubocop      then gate_rubocop
       when :structural   then gate_structural
-      when :zeitwerk     then gate_shell(:zeitwerk, "bin/rails zeitwerk:check")
-      when :migrate      then gate_shell(:migrate, "bin/rails db:migrate")
+      when :zeitwerk     then gate_shell(:zeitwerk, @profile.gate_command(:zeitwerk))
+      when :migrate      then gate_shell(:migrate, @profile.gate_command(:migrate))
       when :focused_test then gate_focused_test
-      when :full_test    then gate_shell(:full_test, "bin/rails test")
+      when :full_test    then gate_shell(:full_test, @profile.test_command)
       end
     end
 
@@ -203,7 +205,7 @@ module Calvin
       problems.concat(check_file_plan_alignment)
       problems.concat(check_migration_timestamps)
       problems.concat(check_route_controllers)
-      problems.concat(check_model_validations)
+      problems.concat(check_forbidden_patterns)
 
       return ok(:structural, "#{@files.size} file(s) conformi") if problems.empty?
 
@@ -349,14 +351,16 @@ module Calvin
       problems
     end
 
-    # implement_system.md ripete "Never add validates to any model file": qui è verificabile.
-    def check_model_validations
-      @files.filter_map do |f|
+    # Pattern che il progetto target dichiara vietati in `.calvin/project.yml`.
+    #
+    # Prima qui era compilata una regola di synca ("niente `validates` sotto app/models — i
+    # model sono strutture dati"): una convenzione di UN progetto dentro il motore, che su
+    # qualunque altra applicazione Rails avrebbe bocciato codice corretto. Ora la regola la
+    # dichiara il progetto, e Calvin la applica senza saperla.
+    def check_forbidden_patterns
+      @files.flat_map do |f|
         path = f[:path].to_s
-        next unless path.start_with?("app/models/")
-        next unless f[:content].to_s.match?(/^\s*validates?\s/)
-
-        { path: path, message: "#{path}: contiene `validates`/`validate` — i model del progetto sono strutture dati" }
+        @profile.forbidden_matches(path, f[:content]).map { |message| { path: path, message: message } }
       end
     end
 
@@ -377,24 +381,31 @@ module Calvin
       paths = focused_test_paths
       return nil if paths.empty?
 
-      success, output = shell("bin/rails test #{paths.map { |p| Shellwords.escape(p) }.join(' ')}")
+      command = @profile.test_command
+      success, output = shell("#{command} #{paths.map { |p| Shellwords.escape(p) }.join(' ')}")
       return ok(:focused_test, "#{paths.size} test file(s) verdi") if success
 
       red(:focused_test, output, paths)
     end
 
     # Da app/services/foo_service.rb ricava test/services/foo_service_test.rb se esiste.
+    # La derivazione la definisce il progetto (`test.path_map`), non Calvin: un progetto a
+    # RSpec mappa su spec/…_spec.rb e qui non cambia niente.
     def focused_test_paths
       @files.filter_map do |f|
-        path = f[:path].to_s
-        next unless path.start_with?("app/")
-
-        candidate = path.sub(%r{\Aapp/}, "test/").sub(/\.rb\z/, "_test.rb")
-        candidate if @workspace&.exist?(candidate)
+        candidate = @profile.test_path_for(f[:path].to_s)
+        candidate if candidate && @workspace&.exist?(candidate)
       end.uniq
     end
 
+    # command nil = il progetto non espone questo gate (es. nessun zeitwerk:check):
+    # va saltato, non fatto fallire.
     def gate_shell(stage, command)
+      if command.nil?
+        Calvin::LOG.info "Validator: #{stage} non dichiarato dal profilo — gate saltato"
+        return nil
+      end
+
       success, output = shell(command)
       return ok(stage, output.lines.last.to_s.strip) if success
 
